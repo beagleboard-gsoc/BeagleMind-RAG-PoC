@@ -11,8 +11,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class QASystem:
-    def __init__(self, retrieval_system):
+    def __init__(self, retrieval_system, collection_name):
         self.retrieval_system = retrieval_system
+        self.collection_name = collection_name
         self.llm = ChatGroq(
             groq_api_key=GROQ_API_KEY,
             model_name="llama-3.3-70b-versatile",
@@ -203,16 +204,46 @@ class QASystem:
             
         else:
             system_prompt = """You are a knowledgeable technical assistant. Provide accurate, helpful answers based on the given context."""
-        
-        prompt = f"""{system_prompt}
+        collection_name = self.collection_name
+        source_repo= "beagley-ai" if collection_name == "beaglemind_beagleY_ai" else "docs.beagleboard.io"
+        prompt = f"""
+{system_prompt}
 
-Use the following context documents to answer the question. Be specific and cite relevant files/sections when possible.
+You are an expert documentation assistant for the Beagleboard project.
+
+Your task is to answer the user's question using only the provided context documents. Follow the formatting and citation instructions carefully.
+
+---
+
+**Instructions:**
+
+1. Use the following context documents to answer the question accurately and concisely.
+2. Be specific, and when possible, cite the exact **file and section** where the information comes from.
+3. When referring to files or metadata, follow these linking rules:
+
+**a. For image files (e.g., `.png`, `.jpg`, `.webp`):**
+- Use markdown image syntax:
+  `![alt-text](https://raw.githubusercontent.com/beagleboard/{source_repo}/main/FILE_PATH)`
+- Replace `FILE_PATH` with the correct file path (e.g., `images/board-photo.webp`)
+- Make sure the exclamation mark `!` precedes the brackets `[]`.
+
+**b. For regular file links (e.g., `.md`, `.txt`, or referencing a file in general):**
+- Use markdown link syntax:
+  `[link-text](https://github.com/beagleboard/{source_repo}/tree/main/FILE_PATH)`
+- Replace `FILE_PATH` with the actual relative path of the file.
+- For example: `[README](https://github.com/beagleboard/{source_repo}/tree/main/README.md)`
+
+**Important:** Always verify the file path and extension. Do not fabricate or hallucinate paths. Only cite links when they are relevant to the answer.
+
+---
 
 {context}
 
 Question: {question}
 
-Answer:"""
+Answer:
+"""
+
         
         return prompt
     

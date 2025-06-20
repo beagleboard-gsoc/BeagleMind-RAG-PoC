@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class RetrievalSystem:
-    def __init__(self):
+    def __init__(self, collection_name: str = "beaglemind_col"):
         # Initialize embeddings using SentenceTransformers BGE model
         self.embedding_model = SentenceTransformer("BAAI/bge-base-en-v1.5")
 
@@ -36,10 +36,10 @@ class RetrievalSystem:
         )
         
         # Connect to Milvus
-        connections.connect("default", host="localhost", port="19530", collection_name="beaglemind_col")
+        connections.connect("default", host="localhost", port="19530", collection_name=collection_name)
         
         
-    def create_collection(self, collection_name="beaglemind_col"):
+    def create_collection(self, collection_name:str="beaglemind_beagleY_ai"):
         """Create Milvus collection for storing embeddings"""
         #if utility.has_collection(collection_name):
         #    utility.drop_collection(collection_name)

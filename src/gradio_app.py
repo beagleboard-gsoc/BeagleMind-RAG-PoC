@@ -17,8 +17,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class GradioRAGApp:
-    def __init__(self):
+    def __init__(self, collection_name: str = "beaglemind_col"):
         """Initialize the Gradio RAG application"""
+        self.collection_name = collection_name
         self.retrieval_system = None
         self.qa_system = None
         self.setup_system()
@@ -29,11 +30,11 @@ class GradioRAGApp:
             logger.info("Initializing RAG system...")
             
             # Initialize retrieval system
-            self.retrieval_system = RetrievalSystem()
-            self.retrieval_system.create_collection()
+            self.retrieval_system = RetrievalSystem(self.collection_name)
+            self.retrieval_system.create_collection(self.collection_name)
             
             # Initialize QA system
-            self.qa_system = QASystem(self.retrieval_system)
+            self.qa_system = QASystem(self.retrieval_system, self.collection_name)
             
             logger.info("RAG system initialized successfully")
             
@@ -60,7 +61,7 @@ class GradioRAGApp:
             
             markdown_sources += f"**File:** `{file_name}` ({file_type})\n"
             if file_path:
-                markdown_sources += f"**Path:** `{file_path}`\n Link: [{file_name}](https://github.com/beagleboard/docs.beagleboard.io/tree/main/{file_path})"
+                markdown_sources += f"**Path:** `{file_path}`\n Link: [{file_name}](https://github.com/beagleboard/beagley-ai/tree/main/{file_path})"
             if language != 'unknown':
                 markdown_sources += f"**Language:** {language}\n"
             
@@ -151,7 +152,7 @@ class GradioRAGApp:
                 "How to troubleshoot issues?"
             ]
 
-    def chat_with_bot(self, message: str, history: List[Tuple[str, str]], 
+    def chat_with_bot(self, message: str, history: List[Tuple[str, str]],
                      search_strategy: str = "adaptive") -> Tuple[str, List[Tuple[str, str]], str, str]:
         """
         Process user message and return response with sources
@@ -203,9 +204,8 @@ class GradioRAGApp:
         return [], "Chat cleared. Ask me anything!"
     
     def create_interface(self):
-        """Create and configure the Gradio interface with enhanced UI"""
+        """Create and configure the Gradio interface with collection selection logic"""
 
-        # Custom CSS for better styling and layout
         css = """
         .gradio-container {
             max-width: 1800px !important;
@@ -226,18 +226,22 @@ class GradioRAGApp:
 
         with gr.Blocks(css=css, title="RAG Chatbot", theme=gr.themes.Soft()) as interface:
 
-            gr.Markdown(
-                """
-                # RAG Chatbot (Beaglemind RAG System PoC)
-
-                Ask questions about the repository content. The system will search through 
-                the knowledge base and provide answers with relevant sources. The knowledge base is extracted from this repoitory: [beagleboard/docs.beagleboard.io](https://github.com/beagleboard/docs.beagleboard.io).
-                """,
-                elem_id="header"
-            )
+            gr.Markdown("# RAG Chatbot (Beaglemind RAG System PoC)")
 
             with gr.Row():
-                # Left column - Chat interface (wider)
+                collection_dropdown = gr.Dropdown(
+                    label="Select Knowledge Base",
+                    choices=[
+                        "General Information",
+                        "BeagleY-AI Hardware"
+                    ],
+                    value="General Information",  # default
+                    interactive=True
+                )
+
+            # Step 2: Chatbot block
+            with gr.Row() as chat_row:
+
                 with gr.Column(scale=5, min_width=800):
                     chatbot = gr.Chatbot(
                         value=[],
@@ -247,18 +251,16 @@ class GradioRAGApp:
                         bubble_full_width=False
                     )
 
-                    with gr.Row():
-                        msg_input = gr.Textbox(
-                            placeholder="Ask a question about the repository...",
-                            show_label=False,
-                            scale=5,
-                            container=False
-                        )
-                        submit_btn = gr.Button("Send", variant="primary", scale=1)
+                    msg_input = gr.Textbox(
+                        placeholder="Ask a question about the repository...",
+                        show_label=False,
+                        scale=5,
+                        container=False
+                    )
 
+                    submit_btn = gr.Button("Send", variant="primary", scale=1)
                     clear_btn = gr.Button("Clear Chat", variant="secondary")
 
-                # Right column - Sources (also wider)
                 with gr.Column(scale=4, min_width=600):
                     gr.Markdown("### Sources & References")
                     sources_display = gr.Markdown(
@@ -266,7 +268,24 @@ class GradioRAGApp:
                         elem_classes=["sources-container"]
                     )
 
-            # Event handlers
+            # 🔁 Triggered when dropdown changes
+            def update_collection_and_reset(selected_collection):
+                if selected_collection == "BeagleY-AI Hardware":
+                    self.collection_name = "beaglemind_beagleY_ai"
+                else:
+                    self.collection_name = "beaglemind_collection"
+
+                logger.info(f"🔁 Switching to collection: {self.collection_name}")
+                self.setup_system()
+                return [], "Switched collection. Ask me anything!"
+
+            collection_dropdown.change(
+                fn=update_collection_and_reset,
+                inputs=[collection_dropdown],
+                outputs=[chatbot, sources_display]
+            )
+
+            # 🧠 Main chatbot handler
             def submit_message(message, history):
                 return self.chat_with_bot(message, history)
 
@@ -289,8 +308,6 @@ class GradioRAGApp:
             )
 
         return interface
-
-        
     def launch(self, share=False, server_name="127.0.0.1", server_port=7860):
         """Launch the Gradio interface"""
         try:

@@ -877,7 +877,7 @@ class GitHubDirectIngester:
             raise ValueError(f"Invalid GitHub repository URL: {repo_url}")
         
         repo_owner, repo_name = repo_match.groups()
-        repo_name = repo_name.rstrip('.git')  # Remove .git suffix if present
+        
         
         try:
             # Step 1: Fetch repository tree
