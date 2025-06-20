@@ -1,0 +1,19 @@
+pip-requirements
+# Milvus and embeddings
+pymilvus>=2.3.0
+sentence-transformers>=2.2.2
+
+# LangChain for Groq
+langchain>=0.1.0
+langchain-groq>=0.0.1
+
+# Reranking
+torch>=1.9.0
+transformers>=4.21.0
+
+# Document processing
+pypdf>=3.17.0
+python-docx>=0.8.11
+
+# Data processing and analysis
+pandas

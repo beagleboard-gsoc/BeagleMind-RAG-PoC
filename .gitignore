@@ -1,0 +1,5 @@
+.env
+repo_clone
+myenv
+datasets
+src/__pycache__
