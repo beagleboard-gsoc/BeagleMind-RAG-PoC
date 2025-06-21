@@ -16,5 +16,5 @@ jobs:
         run: |
           git config --global user.name 'fayezzouari'
           git config --global user.email 'fayez.zouari@insat.ucar.tn'
-          git remote add gitlab https://fayezzouari:${{ secrets.GITLAB_TOKEN }}@gitlab.com/fayezzouari/BeagleMind-RAG-PoC.git
+          git remote add gitlab https://fayezzouari:${{ secrets.GITLAB_TOKEN }}@gitlab.com/fayezzouari/BeagleMind-RAG-PoC
           git push gitlab main --force
