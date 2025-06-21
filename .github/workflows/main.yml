@@ -14,7 +14,7 @@ jobs:
 
       - name: Push to GitLab
         run: |
-          git config --global user.name 'GitHub Actions'
-          git config --global user.email 'actions@github.com'
+          git config --global user.name 'fayezzouari'
+          git config --global user.email 'fayez.zouari@insat.ucar.tn'
           git remote add gitlab https://fayezzouari:${{ secrets.GITLAB_TOKEN }}@gitlab.com/fayezzouari/BeagleMind-RAG-PoC.git
           git push gitlab main --force
