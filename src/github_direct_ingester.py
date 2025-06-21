@@ -197,24 +197,11 @@ class GitHubDirectIngester:
         # Handle existing collection with better error handling
         try:
             if utility.has_collection(self.collection_name):
-                logger.info(f"Collection '{self.collection_name}' already exists")
-                
-                # Try to drop and recreate if needed
-                try:
-                    utility.drop_collection(self.collection_name)
-                    logger.info(f"Dropped existing collection to recreate with new schema")
-                    time.sleep(2)  # Wait for cleanup
-                except Exception as drop_error:
-                    logger.warning(f"Could not drop existing collection: {drop_error}")
-                    # Try to use existing collection
-                    try:
-                        self.collection = Collection(self.collection_name)
-                        self.collection.load()
-                        logger.info("Using existing collection")
-                        return
-                    except Exception as load_error:
-                        logger.error(f"Cannot use existing collection: {load_error}")
-                        raise
+                logger.info(f"Collection '{self.collection_name}' already exists, loading to append new data.")
+                self.collection = Collection(self.collection_name)
+                self.collection.load()
+                logger.info("Using existing collection")
+                return
             
             # Create new collection with retry logic
             max_create_retries = 3

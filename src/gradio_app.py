@@ -228,17 +228,6 @@ class GradioRAGApp:
 
             gr.Markdown("# RAG Chatbot (Beaglemind RAG System PoC)")
 
-            with gr.Row():
-                collection_dropdown = gr.Dropdown(
-                    label="Select Knowledge Base",
-                    choices=[
-                        "General Information",
-                        "BeagleY-AI Hardware"
-                    ],
-                    value="General Information",  # default
-                    interactive=True
-                )
-
             # Step 2: Chatbot block
             with gr.Row() as chat_row:
 
@@ -267,23 +256,6 @@ class GradioRAGApp:
                         value="Sources will appear here after asking a question.",
                         elem_classes=["sources-container"]
                     )
-
-            # 🔁 Triggered when dropdown changes
-            def update_collection_and_reset(selected_collection):
-                if selected_collection == "BeagleY-AI Hardware":
-                    self.collection_name = "beaglemind_beagleY_ai"
-                else:
-                    self.collection_name = "beaglemind_collection"
-
-                logger.info(f"🔁 Switching to collection: {self.collection_name}")
-                self.setup_system()
-                return [], "Switched collection. Ask me anything!"
-
-            collection_dropdown.change(
-                fn=update_collection_and_reset,
-                inputs=[collection_dropdown],
-                outputs=[chatbot, sources_display]
-            )
 
             # 🧠 Main chatbot handler
             def submit_message(message, history):
