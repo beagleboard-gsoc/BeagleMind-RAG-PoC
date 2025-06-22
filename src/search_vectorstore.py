@@ -324,6 +324,7 @@ class VectorStoreSearcher:
                     'information_value_score': float(hit.entity.get('information_value_score', 0))
                 }
             }
+            print(f"Processing result: {result}")
             search_results.append(result)
         
         logger.info(f"Found {len(search_results)} filtered results")

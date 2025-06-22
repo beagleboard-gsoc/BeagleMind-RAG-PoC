@@ -158,6 +158,12 @@ class QASystem:
             
             if file_info.get('language') != 'unknown':
                 context_part += f"Language: {file_info.get('language')}\n"
+
+            if metadata.get('source_link'):
+                context_part += f"Source Link: {metadata.get('source_link')}\n"
+            
+            if metadata.get('raw_url'):
+                context_part += f"Raw URL: {metadata.get('raw_url')}\n"
             
             if metadata.get('has_code'):
                 context_part += "Contains: Code\n"
@@ -204,8 +210,6 @@ class QASystem:
             
         else:
             system_prompt = """You are a knowledgeable technical assistant. Provide accurate, helpful answers based on the given context."""
-        collection_name = self.collection_name
-        source_repo= "beagley-ai" if collection_name == "beaglemind_beagleY_ai" else "docs.beagleboard.io"
         prompt = f"""
 {system_prompt}
 
@@ -215,25 +219,17 @@ Your task is to answer the user's question using only the provided context docum
 
 ---
 
+
 **Instructions:**
 
 1. Use the following context documents to answer the question accurately and concisely.
 2. Be specific, and when possible, cite the exact **file and section** where the information comes from.
-3. When referring to files or metadata, follow these linking rules:
+3. When referring to files or metadata, use the provided `Source Link` or `Raw URL` from the context documents.
+   - To display a clickable link to a file, use the `Source Link`. For example: `[filename.md](Source Link)`.
+   - For images, use the `Raw URL` in markdown image syntax. For example: `![alt text](Raw URL)`.
+   - When citing a source without a link, you can refer to the file name.
 
-**a. For image files (e.g., `.png`, `.jpg`, `.webp`):**
-- Use markdown image syntax:
-  `![alt-text](https://raw.githubusercontent.com/beagleboard/{source_repo}/main/FILE_PATH)`
-- Replace `FILE_PATH` with the correct file path (e.g., `images/board-photo.webp`)
-- Make sure the exclamation mark `!` precedes the brackets `[]`.
-
-**b. For regular file links (e.g., `.md`, `.txt`, or referencing a file in general):**
-- Use markdown link syntax:
-  `[link-text](https://github.com/beagleboard/{source_repo}/tree/main/FILE_PATH)`
-- Replace `FILE_PATH` with the actual relative path of the file.
-- For example: `[README](https://github.com/beagleboard/{source_repo}/tree/main/README.md)`
-
-**Important:** Always verify the file path and extension. Do not fabricate or hallucinate paths. Only cite links when they are relevant to the answer.
+**Important:** Always use the full links provided in the context. Do not fabricate or hallucinate paths. Only cite links when they are relevant to the answer.
 
 ---
 
