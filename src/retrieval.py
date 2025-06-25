@@ -39,7 +39,7 @@ class RetrievalSystem:
         connections.connect("default", host="localhost", port="19530", collection_name=collection_name)
         
         
-    def create_collection(self, collection_name:str="beaglemind_beagleY_ai"):
+    def create_collection(self, collection_name="beaglemind_beagleY_ai"):
         """Create Milvus collection for storing embeddings"""
         #if utility.has_collection(collection_name):
         #    utility.drop_collection(collection_name)

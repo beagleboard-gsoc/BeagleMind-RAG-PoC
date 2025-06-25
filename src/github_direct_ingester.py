@@ -426,61 +426,33 @@ class GitHubDirectIngester:
     def semantic_chunk_content(self, content: str, file_info: Dict[str, Any], 
                               max_chunk_size: int = 1000) -> List[str]:
         """
-        Perform semantic chunking of content.
+        Perform chunking of content using chonkie.CodeChunker.
         
         Args:
             content: Content to chunk
             file_info: File information for context
-            max_chunk_size: Maximum chunk size
+            max_chunk_size: Maximum chunk size (ignored, uses 512 tokens)
             
         Returns:
-            List of semantically coherent chunks
+            List of chunk texts
         """
         try:
-            # Try semantic chunking first
-            semantic_splitter = SemanticChunker(
-                embeddings=self.langchain_embeddings,
-                breakpoint_threshold_type="percentile",
-                breakpoint_threshold_amount=85  # More sensitive to semantic breaks
-            )
-            
-            chunks = semantic_splitter.split_text(content)
-            
-            # If chunks are too large, use recursive splitter as backup
-            oversized_chunks = [chunk for chunk in chunks if len(chunk) > max_chunk_size * 1.5]
-            if oversized_chunks:
-                logger.info(f"Refining {len(oversized_chunks)} oversized chunks for {file_info['name']}")
-                
-                refined_chunks = []
-                recursive_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=max_chunk_size,
-                    chunk_overlap=200,
-                    separators=["\n\n", "\n", ". ", " ", ""],
-                    keep_separator=True
-                )
-                
-                for chunk in chunks:
-                    if len(chunk) > max_chunk_size * 1.5:
-                        refined_chunks.extend(recursive_splitter.split_text(chunk))
-                    else:
-                        refined_chunks.append(chunk)
-                
-                return refined_chunks
-            
-            return chunks
-            
-        except Exception as e:
-            logger.warning(f"Semantic chunking failed for {file_info['name']}: {e}. Using recursive splitter.")
-            
-            # Fallback to recursive chunking
-            recursive_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=max_chunk_size,
-                chunk_overlap=200,
-                separators=["\n\n", "\n", ". ", " ", ""],
-                keep_separator=True
-            )
-            
-            return recursive_splitter.split_text(content)
+            from chonkie import CodeChunker
+        except ImportError:
+            raise ImportError("chonkie is not installed. Please install it to use this chunker.")
+
+        # Detect language for chonkie
+        language = self._detect_language(content, file_info.get('extension', ''))
+        if language == 'unknown':
+            language = 'text'
+        chunker = CodeChunker(
+            language=language,
+            tokenizer_or_token_counter="gpt2",
+            chunk_size=512,
+            include_nodes=False
+        )
+        chunks = chunker.chunk(content)
+        return [chunk.text for chunk in chunks]
     
     def analyze_content(self, content: str, file_info: Dict[str, Any]) -> Dict[str, Any]:
         """

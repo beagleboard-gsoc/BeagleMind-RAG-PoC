@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class GradioRAGApp:
-    def __init__(self, collection_name: str = "beaglemind_col"):
+    def __init__(self, collection_name: str = "beaglemind_w_chonkie"):
         """Initialize the Gradio RAG application"""
         self.collection_name = collection_name
         self.retrieval_system = None
