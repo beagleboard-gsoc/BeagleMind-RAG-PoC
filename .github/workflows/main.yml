@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  lint-and-format:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -16,29 +16,46 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'  # or specify a version like '3.9'
+          python-version: '3.x'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install black flake8  # or pylint if you prefer
+          pip install black flake8
 
-      - name: Run Black
+      - name: Run Black check
+        id: black-check
+        continue-on-error: true
         run: |
-          black --check .
+          black --check . || echo "needs_formatting=true" >> $GITHUB_OUTPUT
 
       - name: Run flake8
         run: |
           flake8 .
 
+      - name: Auto-format with Black
+        if: steps.black-check.outputs.needs_formatting == 'true'
+        run: |
+          black .
+          
+      - name: Commit formatting changes
+        if: steps.black-check.outputs.needs_formatting == 'true' && github.event_name == 'pull_request'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "style: Auto-format with Black"
+          git push
+
   sync:
-    needs: lint  # Only run sync if lint passes
+    needs: lint-and-format
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Full clone
+          fetch-depth: 0
           
       - name: Push to GitLab
         run: |
