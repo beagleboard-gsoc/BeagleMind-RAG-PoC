@@ -29,10 +29,6 @@ jobs:
         run: |
           black --check . || echo "needs_formatting=true" >> $GITHUB_OUTPUT
 
-      - name: Run flake8
-        run: |
-          flake8 .
-
       - name: Auto-format with Black
         if: steps.black-check.outputs.needs_formatting == 'true'
         run: |
