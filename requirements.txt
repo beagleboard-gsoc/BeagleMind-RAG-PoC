@@ -1,7 +1,10 @@
-pip-requirements
 # Milvus and embeddings
 pymilvus>=2.3.0
 sentence-transformers>=2.2.2
+
+# LLM APIs
+groq
+requests
 
 # LangChain for Groq
 langchain>=0.1.0
@@ -17,3 +20,6 @@ python-docx>=0.8.11
 
 # Data processing and analysis
 pandas
+
+# Web interface
+gradio

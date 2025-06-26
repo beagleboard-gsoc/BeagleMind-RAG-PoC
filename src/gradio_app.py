@@ -2,6 +2,7 @@
 
 import gradio as gr
 import logging
+import re
 from typing import List, Tuple
 from .retrieval import RetrievalSystem
 from .qa_system import QASystem
@@ -18,6 +19,12 @@ GROQ_MODELS = [
     "meta-llama/llama-4-maverick-17b-128e-instruct"
 ]
 
+OLLAMA_MODELS = [
+    "qwen3:1.7b",
+]
+
+LLM_BACKENDS = ["groq", "ollama"]
+
 class GradioRAGApp:
     def __init__(self, collection_name: str = "beaglemind_w_chonkie"):
         """Initialize the Gradio RAG application"""
@@ -25,6 +32,7 @@ class GradioRAGApp:
         self.retrieval_system = None
         self.qa_system = None
         self.selected_model = GROQ_MODELS[0]
+        self.selected_backend = LLM_BACKENDS[0]
         self.temperature = 0.3
         self.setup_system()
     
@@ -45,6 +53,23 @@ class GradioRAGApp:
         except Exception as e:
             logger.error(f"Failed to initialize RAG system: {e}")
             raise
+    
+    def clean_llm_response(self, response: str) -> str:
+        """Clean LLM response by removing thinking tags and extracting actual answer"""
+        if not response:
+            return response
+        
+        # Remove <think>...</think> tags and their content
+        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Remove any remaining thinking patterns
+        cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
+        cleaned = cleaned.strip()
+        
+        return cleaned
     
     def format_sources(self, sources: List[dict]) -> str:
         """Format source information as markdown with enhanced details"""
@@ -156,7 +181,7 @@ class GradioRAGApp:
                 "How to troubleshoot issues?"
             ]
 
-    def chat_with_bot(self, message: str, history: list, model_name: str, temperature: float, search_strategy: str = "adaptive") -> Tuple[str, List[Tuple[str, str]], str, str]:
+    def chat_with_bot(self, message: str, history: list, model_name: str, temperature: float, llm_backend: str, search_strategy: str = "adaptive") -> Tuple[str, List[Tuple[str, str]], str, str]:
         """
         Process user message and return response with sources
         
@@ -165,6 +190,7 @@ class GradioRAGApp:
             history: Chat history as list of (user, bot) tuples
             model_name: Selected model name
             temperature: Sampling temperature
+            llm_backend: LLM backend (groq or ollama)
             search_strategy: Search strategy to use
             
         Returns:
@@ -174,19 +200,31 @@ class GradioRAGApp:
             return "", history, "Please enter a question.", ""
         
         try:
-            # Get answer from QA system with selected strategy
-            result = self.qa_system.ask_question(message, search_strategy=search_strategy, model_name=model_name, temperature=temperature)
-            answer = result.get("answer", "Sorry, I couldn't generate an answer.")
+            # Get answer from QA system with selected strategy and backend
+            result = self.qa_system.ask_question(
+                message, 
+                search_strategy=search_strategy, 
+                model_name=model_name, 
+                temperature=temperature,
+                llm_backend=llm_backend
+            )
+            raw_answer = result.get("answer", "Sorry, I couldn't generate an answer.")
             sources = result.get("sources", [])
             search_info = result.get("search_info", {})
             
+            # Clean the answer to remove thinking tags
+            cleaned_answer = self.clean_llm_response(raw_answer)
+            
             # Format answer as markdown
-            formatted_answer = f"## Answer\n\n{answer}"
+            formatted_answer = f"## Answer\n\n{cleaned_answer}"
             
             # Add search strategy info to answer
             question_types = search_info.get("question_types", [])
             if question_types:
                 formatted_answer += f"\n\n---\n**Detected Question Types:** {', '.join(question_types)}"
+            
+            # Add backend info
+            formatted_answer += f"\n**LLM Backend:** {llm_backend.upper()}"
             
             # Update chat history
             history.append((message, formatted_answer))
@@ -203,6 +241,15 @@ class GradioRAGApp:
             error_message = f"Error: {str(e)}"
             history.append((message, error_message))
             return "", history, "Error occurred while processing your question.", ""
+    
+    def get_models_for_backend(self, backend: str) -> list:
+        """Get available models for the selected backend"""
+        if backend.lower() == "groq":
+            return GROQ_MODELS
+        elif backend.lower() == "ollama":
+            return OLLAMA_MODELS
+        else:
+            return GROQ_MODELS  # Default fallback
     
     def clear_chat(self):
         """Clear chat history and sources"""
@@ -231,7 +278,7 @@ class GradioRAGApp:
 
         with gr.Blocks(css=css, title="RAG Chatbot", theme=gr.themes.Soft()) as interface:
 
-            gr.Markdown("# RAG Chatbot (Beaglemind RAG System PoC)")
+            gr.Markdown("# Multi-Backend RAG Chatbot (Groq & Ollama)")
 
             # Step 2: Chatbot block
             with gr.Row() as chat_row:
@@ -263,10 +310,16 @@ class GradioRAGApp:
                     )
 
             with gr.Row():
+                backend_dropdown = gr.Dropdown(
+                    choices=LLM_BACKENDS,
+                    value=self.selected_backend,
+                    label="LLM Backend",
+                    interactive=True
+                )
                 model_dropdown = gr.Dropdown(
-                    choices=GROQ_MODELS,
+                    choices=self.get_models_for_backend(self.selected_backend),
                     value=self.selected_model,
-                    label="Groq Model",
+                    label="Model",
                     interactive=True
                 )
                 temp_slider = gr.Slider(
@@ -274,21 +327,33 @@ class GradioRAGApp:
                     label="Temperature", interactive=True
                 )
 
+            # Function to update model dropdown when backend changes
+            def update_models(backend):
+                models = self.get_models_for_backend(backend)
+                return gr.update(choices=models, value=models[0])
+
+            backend_dropdown.change(
+                fn=update_models,
+                inputs=[backend_dropdown],
+                outputs=[model_dropdown]
+            )
+
             # 🧠 Main chatbot handler
-            def submit_message(message, history, model_name, temperature):
+            def submit_message(message, history, backend, model_name, temperature):
+                self.selected_backend = backend
                 self.selected_model = model_name
                 self.temperature = temperature
-                return self.chat_with_bot(message, history, model_name, temperature)
+                return self.chat_with_bot(message, history, model_name, temperature, backend)
 
             submit_btn.click(
                 fn=submit_message,
-                inputs=[msg_input, chatbot, model_dropdown, temp_slider],
+                inputs=[msg_input, chatbot, backend_dropdown, model_dropdown, temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
             msg_input.submit(
                 fn=submit_message,
-                inputs=[msg_input, chatbot, model_dropdown, temp_slider],
+                inputs=[msg_input, chatbot, backend_dropdown, model_dropdown, temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
