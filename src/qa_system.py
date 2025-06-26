@@ -1,4 +1,3 @@
-from langchain_groq import ChatGroq
 from sentence_transformers import CrossEncoder
 import json
 import logging
@@ -14,11 +13,6 @@ class QASystem:
     def __init__(self, retrieval_system, collection_name):
         self.retrieval_system = retrieval_system
         self.collection_name = collection_name
-        self.llm = ChatGroq(
-            groq_api_key=GROQ_API_KEY,
-            model_name="llama-3.3-70b-versatile",
-            temperature=0.3
-        )
         
         # Initialize rerank model
         try:
@@ -244,9 +238,9 @@ Answer:
         return prompt
     
     def ask_question(self, question: str, search_strategy: str = "adaptive", 
-                    n_results: int = 5, include_context: bool = False) -> Dict[str, Any]:
+                    n_results: int = 5, include_context: bool = False, model_name: str = "llama-3-70b-8192", temperature: float = 0.3) -> Dict[str, Any]:
         """Enhanced question answering with adaptive search strategies"""
-        
+        import groq
         # Detect question type for adaptive strategy
         question_types = self.detect_question_type(question)
         logger.info(f"Detected question types: {question_types}")
@@ -321,10 +315,15 @@ Answer:
         # Generate context-aware prompt
         prompt = self.generate_context_aware_prompt(question, reranked_docs, question_types)
         
-        # Get answer from LLM
+        # Get answer from LLM using groq
         try:
-            response = self.llm.invoke(prompt)
-            answer = response.content
+            client = groq.Groq(api_key=GROQ_API_KEY)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature
+            )
+            answer = completion.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"

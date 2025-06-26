@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-Gradio Web Interface for RAG Chatbot
-
-This module provides a web interface using Gradio for the RAG system,
-allowing users to interact with the chatbot and view results in markdown format.
-"""
 
 import gradio as gr
 import logging
@@ -16,12 +10,22 @@ from .qa_system import QASystem
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+GROQ_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "gemma2-9b-it",
+    "deepseek-r1-distill-llama-70b",
+    "meta-llama/llama-4-maverick-17b-128e-instruct"
+]
+
 class GradioRAGApp:
     def __init__(self, collection_name: str = "beaglemind_w_chonkie"):
         """Initialize the Gradio RAG application"""
         self.collection_name = collection_name
         self.retrieval_system = None
         self.qa_system = None
+        self.selected_model = GROQ_MODELS[0]
+        self.temperature = 0.3
         self.setup_system()
     
     def setup_system(self):
@@ -152,14 +156,15 @@ class GradioRAGApp:
                 "How to troubleshoot issues?"
             ]
 
-    def chat_with_bot(self, message: str, history: List[Tuple[str, str]],
-                     search_strategy: str = "adaptive") -> Tuple[str, List[Tuple[str, str]], str, str]:
+    def chat_with_bot(self, message: str, history: list, model_name: str, temperature: float, search_strategy: str = "adaptive") -> Tuple[str, List[Tuple[str, str]], str, str]:
         """
         Process user message and return response with sources
         
         Args:
             message: User's input message
             history: Chat history as list of (user, bot) tuples
+            model_name: Selected model name
+            temperature: Sampling temperature
             search_strategy: Search strategy to use
             
         Returns:
@@ -170,7 +175,7 @@ class GradioRAGApp:
         
         try:
             # Get answer from QA system with selected strategy
-            result = self.qa_system.ask_question(message, search_strategy=search_strategy)
+            result = self.qa_system.ask_question(message, search_strategy=search_strategy, model_name=model_name, temperature=temperature)
             answer = result.get("answer", "Sorry, I couldn't generate an answer.")
             sources = result.get("sources", [])
             search_info = result.get("search_info", {})
@@ -257,19 +262,33 @@ class GradioRAGApp:
                         elem_classes=["sources-container"]
                     )
 
+            with gr.Row():
+                model_dropdown = gr.Dropdown(
+                    choices=GROQ_MODELS,
+                    value=self.selected_model,
+                    label="Groq Model",
+                    interactive=True
+                )
+                temp_slider = gr.Slider(
+                    minimum=0.0, maximum=1.0, value=self.temperature, step=0.01,
+                    label="Temperature", interactive=True
+                )
+
             # 🧠 Main chatbot handler
-            def submit_message(message, history):
-                return self.chat_with_bot(message, history)
+            def submit_message(message, history, model_name, temperature):
+                self.selected_model = model_name
+                self.temperature = temperature
+                return self.chat_with_bot(message, history, model_name, temperature)
 
             submit_btn.click(
                 fn=submit_message,
-                inputs=[msg_input, chatbot],
+                inputs=[msg_input, chatbot, model_dropdown, temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
             msg_input.submit(
                 fn=submit_message,
-                inputs=[msg_input, chatbot],
+                inputs=[msg_input, chatbot, model_dropdown, temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
