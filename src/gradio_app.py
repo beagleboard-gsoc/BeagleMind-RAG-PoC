@@ -65,6 +65,45 @@ class GradioRAGApp:
         # Remove any remaining thinking patterns
         cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
         
+        # Remove empty code blocks (```\n\n``` or ```python\n\n```)
+        cleaned = re.sub(r'```(?:python|bash|shell)?\s*\n\s*\n\s*```', '', cleaned, flags=re.MULTILINE)
+        
+        # Remove markdown code block delimiters from start and end
+        # Remove opening code block delimiter (```python, ```bash, ```shell, or just ```)
+        cleaned = re.sub(r'^```(?:python|bash|shell)?\s*\n?', '', cleaned, flags=re.MULTILINE)
+        
+        # Remove closing code block delimiter (```)
+        cleaned = re.sub(r'\n?```\s*$', '', cleaned, flags=re.MULTILINE)
+        
+        # Remove explanatory text that comes after code blocks
+        # Look for patterns like "This script will..." or "The script..." that appear after code
+        lines = cleaned.split('\n')
+        code_ended = False
+        cleaned_lines = []
+        
+        for line in lines:
+            # If we hit explanatory text after code, stop including lines
+            if code_ended and (
+                line.strip().startswith('This script') or 
+                line.strip().startswith('The script') or
+                line.strip().startswith('This code') or
+                line.strip().startswith('The code') or
+                line.strip().startswith('Note:') or
+                line.strip().startswith('Usage:') or
+                re.match(r'^This .* will', line.strip()) or
+                re.match(r'^The .* will', line.strip())
+            ):
+                break
+            
+            cleaned_lines.append(line)
+            
+            # Detect when we've likely finished the main code block
+            if line.strip() and not line.startswith('#') and not line.startswith('import') and not line.startswith('from'):
+                if any(keyword in line for keyword in ['if __name__', 'main()', 'exit(', 'return']):
+                    code_ended = True
+        
+        cleaned = '\n'.join(cleaned_lines)
+        
         # Clean up extra whitespace
         cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
         cleaned = cleaned.strip()
@@ -255,8 +294,305 @@ class GradioRAGApp:
         """Clear chat history and sources"""
         return [], "Chat cleared. Ask me anything!"
     
+    def generate_code_file(self, query: str, file_type: str, model_name: str, temperature: float, llm_backend: str) -> Tuple[str, str, str]:
+        """
+        Generate a code file based on user query using retrieval for context
+        
+        Args:
+            query: User's request for code generation
+            file_type: Type of file to generate (python or shell)
+            model_name: Selected model name
+            temperature: Sampling temperature
+            llm_backend: LLM backend (groq or ollama)
+            
+        Returns:
+            Tuple of (generated_code, filename, status_message)
+        """
+        if not query.strip():
+            return "", "", "Please enter a code generation request."
+        
+        try:
+            # Use retrieval system to get relevant context for code generation
+            logger.info(f"Retrieving context for code generation: {query}")
+            
+            # Enhanced query for better retrieval
+            enhanced_query = f"{query} {file_type} code example implementation"
+            
+            # Search for relevant code examples and documentation
+            search_filters = {'has_code': True} if file_type == 'python' else {}
+            if file_type == 'python':
+                search_filters['language'] = 'python'
+            
+            search_results = self.retrieval_system.search(
+                enhanced_query, 
+                n_results=5, 
+                filters=search_filters, 
+                rerank=True
+            )
+            
+            # Format context from search results
+            context_parts = []
+            if search_results and search_results['documents'][0]:
+                documents = search_results['documents'][0]
+                metadatas = search_results['metadatas'][0]
+                
+                for i, (doc, metadata) in enumerate(zip(documents[:3], metadatas[:3])):
+                    file_info = f"File: {metadata.get('file_name', 'Unknown')}"
+                    if metadata.get('language'):
+                        file_info += f" (Language: {metadata.get('language')})"
+                    
+                    context_parts.append(f"Example {i+1} - {file_info}:\n{doc}")
+            
+            context = "\n\n" + "="*50 + "\n".join(context_parts) if context_parts else ""
+            
+            # Create a specialized prompt for code generation with context
+            if file_type == "python":
+                code_prompt = f"""
+You are an expert Python developer with access to relevant code examples and documentation.
+
+Use the provided context examples to generate a complete, functional Python script that addresses the user's specific request.
+
+Requirements:
+1. Write clean, well-documented Python code
+2. Include proper imports and error handling
+3. Add docstrings and comments where appropriate
+4. Make the code production-ready
+5. Include a main function if applicable
+6. Learn from the provided examples but create original code
+7. Only return the Python code, no explanations
+
+Context Examples (use as reference):
+{context}
+
+User Request: {query}
+
+Generate a complete Python script:
+"""
+                file_extension = ".py"
+            else:  # shell
+                code_prompt = f"""
+You are an expert shell script developer with access to relevant code examples and documentation.
+
+Use the provided context examples to generate a complete, functional shell script that addresses the user's specific request.
+
+Requirements:
+1. Write clean, well-documented shell script code
+2. Include proper shebang (#!/bin/bash)
+3. Add error handling and exit codes
+4. Add comments explaining each section
+5. Make the script production-ready
+6. Include proper permissions and safety checks
+7. Learn from the provided examples but create original code
+8. Only return the shell script code, no explanations
+
+Context Examples (use as reference):
+{context}
+
+User Request: {query}
+
+Generate a complete shell script:
+"""
+                file_extension = ".sh"
+            
+            # Get code from LLM
+            if llm_backend.lower() == "groq":
+                generated_code = self._get_groq_response(code_prompt, model_name, temperature)
+            elif llm_backend.lower() == "ollama":
+                generated_code = self._get_ollama_response(code_prompt, model_name, temperature)
+            else:
+                raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+            
+            # Clean the response
+            cleaned_code = self.clean_llm_response(generated_code)
+            
+            # Generate intelligent filename using LLM
+            filename = self._generate_intelligent_filename(query, file_type, llm_backend, model_name, temperature)
+            
+            # Enhanced status message with context info
+            context_info = f" (using {len(context_parts)} reference examples)" if context_parts else " (no reference examples found)"
+            status_message = f"✅ Successfully generated {file_type} code file: {filename}{context_info}"
+            
+            return cleaned_code, filename, status_message
+            
+        except Exception as e:
+            error_message = f"❌ Error generating code: {str(e)}"
+            logger.error(f"Code generation failed: {e}")
+            return "", "", error_message
+    
+    def _get_groq_response(self, prompt: str, model_name: str, temperature: float) -> str:
+        """Get response from Groq API"""
+        try:
+            import groq
+            from .config import GROQ_API_KEY
+            client = groq.Groq(api_key=GROQ_API_KEY)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Groq API call failed: {e}")
+            raise
+    
+    def _get_ollama_response(self, prompt: str, model_name: str, temperature: float) -> str:
+        """Get response from Ollama API"""
+        try:
+            import requests
+            import json
+            
+            # Ollama API endpoint (default local)
+            ollama_url = "http://localhost:11434/api/generate"
+            
+            payload = {
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature
+                }
+            }
+            
+            logger.info(f"Calling Ollama with model: {model_name}")
+            response = requests.post(ollama_url, json=payload, timeout=120)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"Ollama response received (length: {len(result.get('response', ''))} chars)")
+            return result.get("response", "No response generated")
+        except Exception as e:
+            logger.error(f"Ollama API call failed: {e}")
+            raise
+    
+    def _generate_intelligent_filename(self, query: str, file_type: str, llm_backend: str, model_name: str, temperature: float) -> str:
+        """Generate an intelligent filename using LLM based on the query content"""
+        try:
+            # Create a specialized prompt for filename generation
+            filename_prompt = f"""
+You are an expert at creating descriptive, professional filenames for code files.
+
+Given the user's request below, generate a single, concise filename that clearly describes what the code does.
+
+Rules:
+1. Use snake_case (underscores between words)
+2. Keep it between 10-25 characters (excluding extension and timestamp)
+3. Use descriptive action words when possible
+4. Avoid generic terms like "script", "code", "file"
+5. Make it professional and clear
+6. Only return the base filename, no extension or timestamp
+7. No spaces, special characters except underscores
+
+Examples:
+- "Create a backup script for files" → "file_backup_tool"
+- "Monitor system resources" → "system_monitor"
+- "LED blinking controller" → "led_controller"
+- "Temperature sensor reader" → "temp_sensor_reader"
+- "Database connection manager" → "db_connection_mgr"
+- "API client for weather data" → "weather_api_client"
+- "Log file analyzer" → "log_analyzer"
+
+User Request: {query}
+File Type: {file_type}
+
+Generate filename (base name only):
+"""
+            
+            # Get filename suggestion from LLM
+            if llm_backend.lower() == "groq":
+                suggested_name = self._get_groq_response(filename_prompt, model_name, 0.3)  # Lower temperature for more consistent naming
+            elif llm_backend.lower() == "ollama":
+                suggested_name = self._get_ollama_response(filename_prompt, model_name, 0.3)
+            else:
+                raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+            
+            # Clean the suggested filename
+            suggested_name = self.clean_llm_response(suggested_name).strip()
+            
+            # Extract just the filename if the LLM returned extra text
+            import re
+            # Look for a valid filename pattern in the response
+            filename_match = re.search(r'([a-z][a-z0-9_]*[a-z0-9])', suggested_name.lower())
+            if filename_match:
+                base_name = filename_match.group(1)
+            else:
+                # Fallback to cleaned version or rule-based generation
+                base_name = re.sub(r'[^\w]', '_', suggested_name.lower())
+                base_name = re.sub(r'_+', '_', base_name)
+                base_name = base_name.strip('_')
+            
+            # Validate and refine the filename
+            if not base_name or len(base_name) < 3:
+                base_name = self._fallback_filename_generation(query, file_type)
+            elif len(base_name) > 25:
+                base_name = base_name[:25].rstrip('_')
+            
+            # Add file extension
+            file_extension = ".py" if file_type == "python" else ".sh"
+            
+            # Add timestamp for uniqueness
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{base_name}_{timestamp}{file_extension}"
+            
+            logger.info(f"Generated intelligent filename: {filename} from query: {query[:50]}...")
+            return filename
+            
+        except Exception as e:
+            logger.warning(f"LLM filename generation failed: {e}. Using fallback method.")
+            return self._fallback_filename_generation(query, file_type)
+    
+    def _fallback_filename_generation(self, query: str, file_type: str) -> str:
+        """Fallback filename generation using rule-based approach"""
+        import re
+        from datetime import datetime
+        
+        # Enhanced pattern-based recognition (same as before but condensed)
+        action_patterns = {
+            r'\b(?:backup|copy)\b': 'backup_tool',
+            r'\b(?:monitor|watch|check)\b': 'monitor_app',
+            r'\b(?:install|setup|configure)\b': 'installer',
+            r'\b(?:deploy|deployment)\b': 'deployer',
+            r'\b(?:test|testing)\b': 'test_runner',
+            r'\b(?:log|logging)\b': 'log_handler',
+            r'\b(?:download|fetch|get)\b': 'downloader',
+            r'\b(?:upload|send|post)\b': 'uploader',
+            r'\b(?:parse|parser|parsing)\b': 'data_parser',
+            r'\b(?:server|service)\b': 'server_app',
+            r'\b(?:client|connect)\b': 'client_app',
+            r'\b(?:api|rest|endpoint)\b': 'api_client',
+            r'\b(?:database|db|sql)\b': 'db_manager',
+            r'\b(?:led|light|blink)\b': 'led_controller',
+            r'\b(?:gpio|pin|hardware)\b': 'gpio_handler',
+            r'\b(?:sensor|temperature|humidity)\b': 'sensor_reader',
+            r'\b(?:automation|automate)\b': 'automation_tool',
+            r'\b(?:cleanup|clean)\b': 'cleanup_util',
+        }
+        
+        query_lower = query.lower()
+        
+        # Find matching pattern
+        for pattern, name in action_patterns.items():
+            if re.search(pattern, query_lower):
+                base_name = name
+                break
+        else:
+            # Extract meaningful words as fallback
+            words = re.findall(r'\b\w+\b', query_lower)
+            stop_words = {'create', 'make', 'build', 'generate', 'write', 'script', 'code', 'file', 'the', 'a', 'an'}
+            key_words = [w for w in words if len(w) > 2 and w not in stop_words][:3]
+            base_name = "_".join(key_words) if key_words else f"{file_type}_script"
+        
+        # Clean up the base name
+        base_name = re.sub(r'[^\w]', '_', base_name)
+        base_name = re.sub(r'_+', '_', base_name).strip('_')
+        
+        # Add timestamp and extension
+        file_extension = ".py" if file_type == "python" else ".sh"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{base_name}_{timestamp}{file_extension}"
+    
     def create_interface(self):
-        """Create and configure the Gradio interface with collection selection logic"""
+        """Create and configure the Gradio interface with tabs for chatbot and code generation"""
 
         css = """
         .gradio-container {
@@ -274,71 +610,153 @@ class GradioRAGApp:
             border-radius: 8px;
             border: 1px solid #e0e0e0;
         }
+        .code-container {
+            height: 500px !important;
+            overflow-y: auto !important;
+            font-family: 'Courier New', monospace;
+        }
         """
 
-        with gr.Blocks(css=css, title="RAG Chatbot", theme=gr.themes.Soft()) as interface:
+        with gr.Blocks(css=css, title="RAG System & Code Generator", theme=gr.themes.Soft()) as interface:
 
-            gr.Markdown("# Multi-Backend RAG Chatbot (Groq & Ollama)")
+            gr.Markdown("# Multi-Backend RAG System with Code Generation")
 
-            # Step 2: Chatbot block
-            with gr.Row() as chat_row:
+            # Tabs for different functionalities
+            with gr.Tabs():
+                # Tab 1: Chatbot
+                with gr.TabItem("💬 RAG Chatbot"):
+                    with gr.Row():
+                        with gr.Column(scale=5, min_width=800):
+                            chatbot = gr.Chatbot(
+                                value=[],
+                                elem_id="chatbot",
+                                show_label=False,
+                                container=True,
+                                bubble_full_width=False
+                            )
 
-                with gr.Column(scale=5, min_width=800):
-                    chatbot = gr.Chatbot(
-                        value=[],
-                        elem_id="chatbot",
-                        show_label=False,
-                        container=True,
-                        bubble_full_width=False
-                    )
+                            msg_input = gr.Textbox(
+                                placeholder="Ask a question about the repository...",
+                                show_label=False,
+                                scale=5,
+                                container=False
+                            )
 
-                    msg_input = gr.Textbox(
-                        placeholder="Ask a question about the repository...",
-                        show_label=False,
-                        scale=5,
-                        container=False
-                    )
+                            with gr.Row():
+                                submit_btn = gr.Button("Send", variant="primary", scale=4)
+                                clear_btn = gr.Button("Clear Chat", variant="secondary", scale=1)
 
-                    submit_btn = gr.Button("Send", variant="primary", scale=1)
-                    clear_btn = gr.Button("Clear Chat", variant="secondary")
+                        with gr.Column(scale=4, min_width=600):
+                            gr.Markdown("### Sources & References")
+                            sources_display = gr.Markdown(
+                                value="Sources will appear here after asking a question.",
+                                elem_classes=["sources-container"]
+                            )
 
-                with gr.Column(scale=4, min_width=600):
-                    gr.Markdown("### Sources & References")
-                    sources_display = gr.Markdown(
-                        value="Sources will appear here after asking a question.",
-                        elem_classes=["sources-container"]
-                    )
+                    # Shared controls for chatbot
+                    with gr.Row():
+                        chat_backend_dropdown = gr.Dropdown(
+                            choices=LLM_BACKENDS,
+                            value=self.selected_backend,
+                            label="LLM Backend",
+                            interactive=True
+                        )
+                        chat_model_dropdown = gr.Dropdown(
+                            choices=self.get_models_for_backend(self.selected_backend),
+                            value=self.selected_model,
+                            label="Model",
+                            interactive=True
+                        )
+                        chat_temp_slider = gr.Slider(
+                            minimum=0.0, maximum=1.0, value=self.temperature, step=0.01,
+                            label="Temperature", interactive=True
+                        )
 
-            with gr.Row():
-                backend_dropdown = gr.Dropdown(
-                    choices=LLM_BACKENDS,
-                    value=self.selected_backend,
-                    label="LLM Backend",
-                    interactive=True
-                )
-                model_dropdown = gr.Dropdown(
-                    choices=self.get_models_for_backend(self.selected_backend),
-                    value=self.selected_model,
-                    label="Model",
-                    interactive=True
-                )
-                temp_slider = gr.Slider(
-                    minimum=0.0, maximum=1.0, value=self.temperature, step=0.01,
-                    label="Temperature", interactive=True
-                )
+                # Tab 2: Code Generation
+                with gr.TabItem("🔧 Code Generator"):
+                    gr.Markdown("### Generate Python or Shell scripts based on your requirements using RAG-enhanced context")
+                    
+                    with gr.Row():
+                        with gr.Column(scale=2):
+                            code_query_input = gr.Textbox(
+                                placeholder="Describe the code you want to generate (e.g., 'Create a script to backup files')",
+                                label="Code Generation Request",
+                                lines=3
+                            )
+                            
+                            file_type_radio = gr.Radio(
+                                choices=["python", "shell"],
+                                value="python",
+                                label="File Type",
+                                interactive=True
+                            )
+                            
+                            generate_btn = gr.Button("Generate Code", variant="primary", size="lg")
+                            
+                            status_output = gr.Textbox(
+                                label="Status",
+                                interactive=False,
+                                lines=2
+                            )
+                            
+                        with gr.Column(scale=3):
+                            filename_output = gr.Textbox(
+                                label="Generated Filename",
+                                interactive=False
+                            )
+                            
+                            code_output = gr.Code(
+                                label="Generated Code",
+                                language="python",
+                                elem_classes=["code-container"],
+                                interactive=False
+                            )
+                            
+                            download_btn = gr.DownloadButton(
+                                label="Download File",
+                                variant="secondary"
+                            )
+                    
+                    # Shared controls for code generation
+                    with gr.Row():
+                        code_backend_dropdown = gr.Dropdown(
+                            choices=LLM_BACKENDS,
+                            value=self.selected_backend,
+                            label="LLM Backend",
+                            interactive=True
+                        )
+                        code_model_dropdown = gr.Dropdown(
+                            choices=self.get_models_for_backend(self.selected_backend),
+                            value=self.selected_model,
+                            label="Model",
+                            interactive=True
+                        )
+                        code_temp_slider = gr.Slider(
+                            minimum=0.0, maximum=1.0, value=self.temperature, step=0.01,
+                            label="Temperature", interactive=True
+                        )
 
-            # Function to update model dropdown when backend changes
-            def update_models(backend):
+            # Functions to update model dropdowns when backend changes
+            def update_chat_models(backend):
+                models = self.get_models_for_backend(backend)
+                return gr.update(choices=models, value=models[0])
+            
+            def update_code_models(backend):
                 models = self.get_models_for_backend(backend)
                 return gr.update(choices=models, value=models[0])
 
-            backend_dropdown.change(
-                fn=update_models,
-                inputs=[backend_dropdown],
-                outputs=[model_dropdown]
+            # Update language highlighting based on file type
+            def update_code_language(file_type):
+                language = "python" if file_type == "python" else "bash"
+                return gr.update(language=language)
+
+            # Event handlers for chatbot tab
+            chat_backend_dropdown.change(
+                fn=update_chat_models,
+                inputs=[chat_backend_dropdown],
+                outputs=[chat_model_dropdown]
             )
 
-            # 🧠 Main chatbot handler
             def submit_message(message, history, backend, model_name, temperature):
                 self.selected_backend = backend
                 self.selected_model = model_name
@@ -347,13 +765,13 @@ class GradioRAGApp:
 
             submit_btn.click(
                 fn=submit_message,
-                inputs=[msg_input, chatbot, backend_dropdown, model_dropdown, temp_slider],
+                inputs=[msg_input, chatbot, chat_backend_dropdown, chat_model_dropdown, chat_temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
             msg_input.submit(
                 fn=submit_message,
-                inputs=[msg_input, chatbot, backend_dropdown, model_dropdown, temp_slider],
+                inputs=[msg_input, chatbot, chat_backend_dropdown, chat_model_dropdown, chat_temp_slider],
                 outputs=[msg_input, chatbot, sources_display]
             )
 
@@ -361,6 +779,41 @@ class GradioRAGApp:
                 fn=self.clear_chat,
                 inputs=[],
                 outputs=[chatbot, sources_display]
+            )
+
+            # Event handlers for code generation tab
+            code_backend_dropdown.change(
+                fn=update_code_models,
+                inputs=[code_backend_dropdown],
+                outputs=[code_model_dropdown]
+            )
+
+            file_type_radio.change(
+                fn=update_code_language,
+                inputs=[file_type_radio],
+                outputs=[code_output]
+            )
+
+            def handle_code_generation(query, file_type, backend, model_name, temperature):
+                generated_code, filename, status = self.generate_code_file(
+                    query, file_type, model_name, temperature, backend
+                )
+                
+                # Prepare file for download if generation was successful
+                if generated_code and filename:
+                    import tempfile
+                    import os
+                    file_path = os.path.join(tempfile.gettempdir(), filename)
+                    with open(file_path, "w") as f:
+                        f.write(generated_code)
+                    return generated_code, filename, status, gr.update(value=file_path, visible=True)
+                else:
+                    return generated_code, filename, status, gr.update(visible=False)
+
+            generate_btn.click(
+                fn=handle_code_generation,
+                inputs=[code_query_input, file_type_radio, code_backend_dropdown, code_model_dropdown, code_temp_slider],
+                outputs=[code_output, filename_output, status_output, download_btn]
             )
 
         return interface
