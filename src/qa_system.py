@@ -238,7 +238,7 @@ Answer:
         return prompt
     
     def ask_question(self, question: str, search_strategy: str = "adaptive", 
-                    n_results: int = 5, include_context: bool = False, model_name: str = "llama-3-70b-8192", temperature: float = 0.3) -> Dict[str, Any]:
+                    n_results: int = 5, include_context: bool = False, model_name: str = "llama-3-70b-8192", temperature: float = 0.3, llm_backend: str = "groq") -> Dict[str, Any]:
         """Enhanced question answering with adaptive search strategies"""
         import groq
         # Detect question type for adaptive strategy
@@ -315,15 +315,15 @@ Answer:
         # Generate context-aware prompt
         prompt = self.generate_context_aware_prompt(question, reranked_docs, question_types)
         
-        # Get answer from LLM using groq
+        # Get answer from LLM using selected backend
         try:
-            client = groq.Groq(api_key=GROQ_API_KEY)
-            completion = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature
-            )
-            answer = completion.choices[0].message.content
+            logger.info(f"Using {llm_backend} backend with model: {model_name}")
+            if llm_backend.lower() == "groq":
+                answer = self._get_groq_response(prompt, model_name, temperature)
+            elif llm_backend.lower() == "ollama":
+                answer = self._get_ollama_response(prompt, model_name, temperature)
+            else:
+                raise ValueError(f"Unsupported LLM backend: {llm_backend}")
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
@@ -476,3 +476,39 @@ Answer:
             'total_questions': len(questions),
             'successful_answers': len([r for r in results if not r['answer'].startswith('Error')])
         }
+    
+    def _get_groq_response(self, prompt: str, model_name: str, temperature: float) -> str:
+        """Get response from Groq API"""
+        import groq
+        client = groq.Groq(api_key=GROQ_API_KEY)
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature
+        )
+        return completion.choices[0].message.content
+    
+    def _get_ollama_response(self, prompt: str, model_name: str, temperature: float) -> str:
+        """Get response from Ollama API"""
+        import requests
+        import json
+        
+        # Ollama API endpoint (default local)
+        ollama_url = "http://localhost:11434/api/generate"
+        
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature
+            }
+        }
+        
+        logger.info(f"Calling Ollama with model: {model_name}")
+        response = requests.post(ollama_url, json=payload, timeout=120)
+        response.raise_for_status()
+        
+        result = response.json()
+        logger.info(f"Ollama response received (length: {len(result.get('response', ''))} chars)")
+        return result.get("response", "No response generated")
