@@ -284,9 +284,10 @@ Answer:
             else:
                 raise ValueError(f"Unsupported LLM backend: {llm_backend}")
             
-            # Post-process the answer to ensure proper code formatting
-            # answer = self._refactor_code_formatting(answer, llm_backend, model_name)
-            
+            # Post-process the answer to ensure proper code formatting and clean markdown
+            answer = self._refactor_code_formatting(answer, llm_backend, model_name)
+            answer = self._validate_and_force_formatting(answer, answer)
+        
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
@@ -300,6 +301,8 @@ Answer:
                 "file_path": doc['file_info'].get('path', ''),
                 "file_type": doc['file_info'].get('type', 'unknown'),
                 "language": doc['file_info'].get('language', 'unknown'),
+                "source_link": doc['metadata'].get('source_link'),
+                "raw_url": doc['metadata'].get('raw_url'),
                 "scores": {
                     "original": round(doc['original_score'], 3),
                     "rerank": round(doc['rerank_score'], 3),
@@ -538,3 +541,23 @@ Refactored text with proper code formatting:
         except Exception as e:
             logger.warning(f"Code formatting refactoring failed: {e}")
             return answer  # Return original answer if refactoring fails
+    
+    def _validate_and_force_formatting(self, answer: str, original_question: str) -> str:
+        """Validate and force consistent formatting for the answer"""
+        try:
+            # Simple validation rules
+            if not answer.startswith('```'):
+                answer = '```\n' + answer  # Ensure starting code block
+            
+            if not answer.endswith('```'):
+                answer += '\n```'  # Ensure ending code block
+            
+            # Enforce single code block for simplicity
+            answer = re.sub(r'```(.+?)\n', r'```\1\n', answer)
+            answer = re.sub(r'```+', '```', answer)  # Remove extra backticks
+            
+            return answer.strip()
+        
+        except Exception as e:
+            logger.warning(f"Formatting validation failed: {e}")
+            return answer  # Return original answer if validation fails

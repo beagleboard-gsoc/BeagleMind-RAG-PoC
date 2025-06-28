@@ -124,11 +124,16 @@ class GradioRAGApp:
             file_path = source.get('file_path', '')
             file_type = source.get('file_type', 'unknown')
             language = source.get('language', 'unknown')
+            source_link = source.get('source_link')
+            raw_url = source.get('raw_url')
 
-            
             markdown_sources += f"**File:** `{file_name}` ({file_type})\n"
-            if file_path:
-                markdown_sources += f"**Path:** `{file_path}`\n Link: [{file_name}](https://github.com/beagleboard/beagley-ai/tree/main/{file_path})"
+            if source_link:
+                markdown_sources += f"**Source Link:** [{file_name}]({source_link})\n"
+            elif file_path:
+                markdown_sources += f"**Path:** `{file_path}`\n"
+            if raw_url:
+                markdown_sources += f"**Raw URL:** {raw_url}\n"
             if language != 'unknown':
                 markdown_sources += f"**Language:** {language}\n"
             
@@ -160,7 +165,6 @@ class GradioRAGApp:
             
             # Content preview with better formatting
             content = source.get('content', '')
-
             
             # Detect if content is code and format accordingly
             if metadata.get('has_code') and language != 'unknown':
@@ -676,45 +680,45 @@ Generate filename (base name only):
                     gr.Markdown("### Generate Python or Shell scripts based on your requirements using RAG-enhanced context")
                     
                     with gr.Row():
-                        with gr.Column(scale=2):
-                            code_query_input = gr.Textbox(
-                                placeholder="Describe the code you want to generate (e.g., 'Create a script to backup files')",
-                                label="Code Generation Request",
-                                lines=3
-                            )
+                        code_query_input = gr.Textbox(
+                            placeholder="Describe the code you want to generate (e.g., 'Create a script to backup files')",
+                            label="Code Generation Request",
+                            lines=3
+                        )
+                    with gr.Row():
+
+                        file_type_radio = gr.Radio(
+                            choices=["python", "shell"],
+                            value="python",
+                            label="File Type",
+                            interactive=True
+                        )
+                    with gr.Row():
+                        generate_btn = gr.Button("Generate Code", variant="primary", size="lg")
+                    with gr.Row():
+                        status_output = gr.Textbox(
+                            label="Status",
+                            interactive=False,
+                            lines=2
+                        )
                             
-                            file_type_radio = gr.Radio(
-                                choices=["python", "shell"],
-                                value="python",
-                                label="File Type",
-                                interactive=True
-                            )
-                            
-                            generate_btn = gr.Button("Generate Code", variant="primary", size="lg")
-                            
-                            status_output = gr.Textbox(
-                                label="Status",
-                                interactive=False,
-                                lines=2
-                            )
-                            
-                        with gr.Column(scale=3):
-                            filename_output = gr.Textbox(
-                                label="Generated Filename",
-                                interactive=False
-                            )
-                            
-                            code_output = gr.Code(
-                                label="Generated Code",
-                                language="python",
-                                elem_classes=["code-container"],
-                                interactive=False
-                            )
-                            
-                            download_btn = gr.DownloadButton(
-                                label="Download File",
-                                variant="secondary"
-                            )
+                    with gr.Row():
+                        filename_output = gr.Textbox(
+                            label="Generated Filename",
+                            interactive=False
+                        )
+                    with gr.Row():
+                        code_output = gr.Code(
+                            label="Generated Code",
+                            language="python",
+                            elem_classes=["code-container"],
+                            interactive=False
+                        )
+                    with gr.Row():
+                        download_btn = gr.DownloadButton(
+                            label="Download File",
+                            variant="secondary"
+                        )
                     
                     # Shared controls for code generation
                     with gr.Row():
@@ -746,7 +750,7 @@ Generate filename (base name only):
 
             # Update language highlighting based on file type
             def update_code_language(file_type):
-                language = "python" if file_type == "python" else "bash"
+                language = "python" if file_type == "python" else "shell"
                 return gr.update(language=language)
 
             # Event handlers for chatbot tab
