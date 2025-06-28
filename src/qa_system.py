@@ -166,64 +166,23 @@ class QASystem:
             
             context_part += f"Content:\n{doc['text']}\n"
             context_parts.append(context_part)
-        
+        # context_parts = context_parts[:5]  # Limit to top 5 documents
         context = "\n" + "="*50 + "\n".join(context_parts)
-        
-        # Customize prompt based on question type
-        if 'code' in question_types:
-            system_prompt = """You are an expert code assistant. When answering code-related questions:
-1. Provide specific code examples when possible
-2. Explain the logic and implementation details
-3. Mention file names and locations when relevant
-4. Include best practices and potential pitfalls
-5. Format code blocks properly with syntax highlighting"""
-            
-        elif 'documentation' in question_types:
-            system_prompt = """You are a documentation expert. When answering documentation questions:
-1. Provide step-by-step instructions when appropriate
-2. Include examples and use cases
-3. Reference specific documentation sections
-4. Explain concepts clearly for different skill levels
-5. Mention related topics and cross-references"""
-            
-        elif 'troubleshooting' in question_types:
-            system_prompt = """You are a troubleshooting expert. When helping with problems:
-1. Identify the root cause based on the context
-2. Provide clear, actionable solutions
-3. Suggest debugging steps or verification methods
-4. Mention common related issues
-5. Include preventive measures when relevant"""
-            
-        elif 'comparison' in question_types:
-            system_prompt = """You are a technical comparison expert. When comparing technologies:
-1. Highlight key differences and similarities
-2. Discuss use cases and trade-offs
-3. Provide objective analysis
-4. Include performance and feature comparisons
-5. Suggest which option might be better for specific scenarios"""
-            
-        else:
-            system_prompt = """You are a knowledgeable technical assistant. Provide accurate, helpful answers based on the given context."""
+        # Use a single unified system prompt
+        system_prompt = """You are an expert documentation assistant for the Beagleboard project."""
+        # print("CONEXT", context, "WFEE")
         prompt = f"""
 {system_prompt}
 
-You are an expert documentation assistant for the Beagleboard project.
-
-Your task is to answer the user's question using only the provided context documents. Follow the formatting and citation instructions carefully.
-
----
-
+Answer the user's question using only the provided context documents.
 
 **Instructions:**
+1. Answer accurately and concisely using the context documents
+2. Cite exact file names and sections when possible
+3. Use provided `Source Link` for file links: `[filename.md](Source Link)`
+4. Use `Raw URL` for images: `![alt text](Raw URL)`
+5. Do not fabricate links - only use those provided in context
 
-1. Use the following context documents to answer the question accurately and concisely.
-2. Be specific, and when possible, cite the exact **file and section** where the information comes from.
-3. When referring to files or metadata, use the provided `Source Link` or `Raw URL` from the context documents.
-   - To display a clickable link to a file, use the `Source Link`. For example: `[filename.md](Source Link)`.
-   - For images, use the `Raw URL` in markdown image syntax. For example: `![alt text](Raw URL)`.
-   - When citing a source without a link, you can refer to the file name.
-
-**Important:** Always use the full links provided in the context. Do not fabricate or hallucinate paths. Only cite links when they are relevant to the answer.
 
 ---
 
@@ -293,7 +252,7 @@ Answer:
                     "strategy": search_strategy,
                     "question_types": question_types,
                     "filters": filters,
-                    "total_found": 0
+                    "total_found": 0        
                 }
             }
         
@@ -324,6 +283,10 @@ Answer:
                 answer = self._get_ollama_response(prompt, model_name, temperature)
             else:
                 raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+            
+            # Post-process the answer to ensure proper code formatting
+            # answer = self._refactor_code_formatting(answer, llm_backend, model_name)
+            
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
@@ -512,3 +475,66 @@ Answer:
         result = response.json()
         logger.info(f"Ollama response received (length: {len(result.get('response', ''))} chars)")
         return result.get("response", "No response generated")
+    
+
+      
+    def _refactor_code_formatting(self, answer: str, llm_backend: str, model_name: str) -> str:
+        """Post-process the answer to ensure proper code snippet formatting using the chosen LLM backend"""
+        try:
+            refactor_prompt = f"""
+You are a markdown formatting expert. Your task is to refactor the given text to ensure all code snippets are properly formatted with correct markdown syntax.
+
+**Instructions:**
+1. Identify all code snippets in the text
+2. Ensure they use proper markdown code blocks with appropriate language identifiers:
+   - ```python for Python code
+   - ```bash or ```shell for shell/terminal commands  
+4. Preserve all non-code content exactly as is
+5. Ensure proper syntax highlighting and readability
+6. Do not change the meaning or content, only improve formatting
+
+Text to refactor:
+{answer}
+
+Refactored text with proper code formatting:
+"""
+
+            if llm_backend.lower() == "groq":
+                import groq
+                client = groq.Groq(api_key=GROQ_API_KEY)
+                completion = client.chat.completions.create(
+                    model=model_name,  # Use faster model for formatting
+                    messages=[{"role": "user", "content": refactor_prompt}],
+                    temperature=0.1  # Low temperature for consistent formatting
+                )
+                refactored_answer = completion.choices[0].message.content
+                
+            elif llm_backend.lower() == "ollama":
+                import requests
+                import json
+                
+                ollama_url = "http://localhost:11434/api/generate"
+                payload = {
+                    "model": model_name,  # Use the same model as the main response
+                    "prompt": refactor_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1  # Low temperature for consistent formatting
+                    }
+                }
+                
+                response = requests.post(ollama_url, json=payload, timeout=60)
+                response.raise_for_status()
+                result = response.json()
+                refactored_answer = result.get("response", answer)
+            
+            else:
+                logger.warning(f"Unsupported backend for refactoring: {llm_backend}")
+                return answer
+            
+            logger.info(f"Successfully refactored code formatting using {llm_backend}")
+            return refactored_answer
+            
+        except Exception as e:
+            logger.warning(f"Code formatting refactoring failed: {e}")
+            return answer  # Return original answer if refactoring fails
