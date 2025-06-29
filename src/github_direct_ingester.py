@@ -29,6 +29,7 @@ from langchain_experimental.text_splitter import SemanticChunker
 import torch
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+from config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -106,14 +107,24 @@ class GitHubDirectIngester:
                 except:
                     pass
                 
-                # Connect with timeout
-                connections.connect(
-                    alias="default", 
-                    host="localhost", 
-                    port="19530",
-                    timeout=30
-                )
+                # Connect with config parameters (Zilliz Cloud/Milvus)
+                connect_kwargs = {
+                    "alias": "default",
+                    "host": MILVUS_HOST,
+                    "port": MILVUS_PORT,
+                    "timeout": 30
+                }
+                # Add user/password/token if available
+                if MILVUS_USER:
+                    connect_kwargs["user"] = MILVUS_USER
+                if MILVUS_PASSWORD:
+                    connect_kwargs["password"] = MILVUS_PASSWORD
+                if MILVUS_TOKEN:
+                    connect_kwargs["token"] = MILVUS_TOKEN
+                if MILVUS_URI:
+                    connect_kwargs["uri"] = MILVUS_URI
                 
+                connections.connect(**connect_kwargs)
                 # Test connection by listing collections
                 utility.list_collections()
                 logger.info("Successfully connected to Milvus")

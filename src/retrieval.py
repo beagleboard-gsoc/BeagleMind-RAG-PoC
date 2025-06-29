@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 import numpy as np
+from .config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -35,8 +36,22 @@ class RetrievalSystem:
             chunk_overlap=200
         )
         
-        # Connect to Milvus
-        connections.connect("default", host="localhost", port="19530", collection_name=collection_name)
+        # Connect to Milvus using config parameters
+        connect_kwargs = {
+            "alias": "default",
+            "host": MILVUS_HOST,
+            "port": MILVUS_PORT,
+            "timeout": 30
+        }
+        if MILVUS_USER:
+            connect_kwargs["user"] = MILVUS_USER
+        if MILVUS_PASSWORD:
+            connect_kwargs["password"] = MILVUS_PASSWORD
+        if MILVUS_TOKEN:
+            connect_kwargs["token"] = MILVUS_TOKEN
+        if MILVUS_URI:
+            connect_kwargs["uri"] = MILVUS_URI
+        connections.connect(**connect_kwargs)
         
         
     def create_collection(self, collection_name="beaglemind_beagleY_ai"):

@@ -3,9 +3,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Milvus connection (e.g. default localhost)
-MILVUS_HOST = os.getenv("MILVUS_HOST", "localhost")
-MILVUS_PORT = int(os.getenv("MILVUS_PORT", 19530))
+# Milvus/Zilliz Cloud connection (online vector store)
+MILVUS_HOST = os.getenv("MILVUS_HOST")
+MILVUS_PORT = int(os.getenv("MILVUS_PORT", 443))
+MILVUS_USER = os.getenv("MILVUS_USER")
+MILVUS_PASSWORD = os.getenv("MILVUS_PASSWORD")
+MILVUS_TOKEN = os.getenv("MILVUS_TOKEN")
+MILVUS_URI = os.getenv("MILVUS_URI")
 
 # Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
