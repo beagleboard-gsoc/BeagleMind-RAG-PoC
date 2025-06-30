@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 GROQ_MODELS = [
-    "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
     "gemma2-9b-it",
     "deepseek-r1-distill-llama-70b",
     "meta-llama/llama-4-maverick-17b-128e-instruct"
