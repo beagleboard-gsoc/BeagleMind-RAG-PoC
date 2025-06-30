@@ -9,6 +9,7 @@ requests
 # LangChain for Groq
 langchain>=0.1.0
 langchain-groq>=0.0.1
+langchain-community
 
 # Reranking
 torch>=1.9.0

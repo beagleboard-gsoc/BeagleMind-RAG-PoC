@@ -9,7 +9,8 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 import numpy as np
-from .config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
+# Import Milvus config from config.py
+from config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -36,21 +37,22 @@ class RetrievalSystem:
             chunk_overlap=200
         )
         
-        # Connect to Milvus using config parameters
+        # Connect to Milvus using config credentials
         connect_kwargs = {
-            "alias": "default",
-            "host": MILVUS_HOST,
-            "port": MILVUS_PORT,
-            "timeout": 30
+            'alias': "default",
+            'timeout': 30
         }
-        if MILVUS_USER:
-            connect_kwargs["user"] = MILVUS_USER
-        if MILVUS_PASSWORD:
-            connect_kwargs["password"] = MILVUS_PASSWORD
-        if MILVUS_TOKEN:
-            connect_kwargs["token"] = MILVUS_TOKEN
         if MILVUS_URI:
-            connect_kwargs["uri"] = MILVUS_URI
+            connect_kwargs['uri'] = MILVUS_URI
+        else:
+            connect_kwargs['host'] = MILVUS_HOST
+            connect_kwargs['port'] = MILVUS_PORT
+        if MILVUS_USER:
+            connect_kwargs['user'] = MILVUS_USER
+        if MILVUS_PASSWORD:
+            connect_kwargs['password'] = MILVUS_PASSWORD
+        if MILVUS_TOKEN:
+            connect_kwargs['token'] = MILVUS_TOKEN
         connections.connect(**connect_kwargs)
         
         

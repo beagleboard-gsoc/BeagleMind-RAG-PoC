@@ -18,6 +18,9 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import time
 
+from config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
+
+
 import requests
 from bs4 import BeautifulSoup
 import markdown
@@ -29,7 +32,6 @@ from langchain_experimental.text_splitter import SemanticChunker
 import torch
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-from config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -95,10 +97,17 @@ class GitHubDirectIngester:
         }
     
     def _connect_to_milvus(self):
-        """Connect to Milvus server with retry logic."""
+        """Connect to Milvus server with retry logic, using config.py variables."""
         max_retries = 3
         retry_delay = 2
-        
+
+        milvus_host = MILVUS_HOST
+        milvus_port = MILVUS_PORT
+        milvus_user = MILVUS_USER
+        milvus_password = MILVUS_PASSWORD
+        milvus_token = MILVUS_TOKEN
+        milvus_uri = MILVUS_URI
+
         for attempt in range(max_retries):
             try:
                 # Disconnect any existing connections first
@@ -106,30 +115,31 @@ class GitHubDirectIngester:
                     connections.disconnect("default")
                 except:
                     pass
-                
-                # Connect with config parameters (Zilliz Cloud/Milvus)
+
                 connect_kwargs = {
-                    "alias": "default",
-                    "host": MILVUS_HOST,
-                    "port": MILVUS_PORT,
-                    "timeout": 30
+                    'alias': "default",
+                    'timeout': 30
                 }
-                # Add user/password/token if available
-                if MILVUS_USER:
-                    connect_kwargs["user"] = MILVUS_USER
-                if MILVUS_PASSWORD:
-                    connect_kwargs["password"] = MILVUS_PASSWORD
-                if MILVUS_TOKEN:
-                    connect_kwargs["token"] = MILVUS_TOKEN
-                if MILVUS_URI:
-                    connect_kwargs["uri"] = MILVUS_URI
-                
+                # Prefer URI if available (for Zilliz Cloud)
+                if milvus_uri:
+                    connect_kwargs['uri'] = milvus_uri
+                else:
+                    connect_kwargs['host'] = milvus_host
+                    connect_kwargs['port'] = milvus_port
+                if milvus_user:
+                    connect_kwargs['user'] = milvus_user
+                if milvus_password:
+                    connect_kwargs['password'] = milvus_password
+                if milvus_token:
+                    connect_kwargs['token'] = milvus_token
+
                 connections.connect(**connect_kwargs)
+
                 # Test connection by listing collections
                 utility.list_collections()
-                logger.info("Successfully connected to Milvus")
+                logger.info(f"Successfully connected to Milvus at {milvus_host}:{milvus_port}")
                 return
-                
+
             except Exception as e:
                 logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
@@ -707,6 +717,13 @@ class GitHubDirectIngester:
                 if att_name in chunk.lower():
                     chunk_attachments.append(att_link)
             
+                # Assign github_url and docs source_link
+            github_url = file_info['source_link']
+            docs_path = file_info['path']
+            if docs_path.endswith('.rst'):
+                docs_path = docs_path[:-4] + '.html'
+            docs_url = f"https://docs.beagle.cc/{docs_path}"
+            
             chunk_metadata = {
                 'id': str(uuid.uuid4()),
                 'document': chunk,
@@ -714,7 +731,8 @@ class GitHubDirectIngester:
                 'file_path': file_info['path'],
                 'file_type': file_info['extension'],
                 'file_size': file_info['size'],
-                'source_link': file_info['source_link'],
+                'source_link': docs_url,
+                'github_url': github_url,
                 'raw_url': file_info['raw_url'],
                 'blob_url': file_info['blob_url'],
                 'chunk_index': i,
