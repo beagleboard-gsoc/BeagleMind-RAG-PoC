@@ -133,19 +133,6 @@ class GradioRAGApp:
             if language != 'unknown':
                 markdown_sources += f"**Language:** {language}\n"
             
-            # Scoring information
-            scores = source.get('scores', {})
-            if scores:
-                markdown_sources += f"**Scores:** "
-                score_parts = []
-                if 'composite' in scores:
-                    score_parts.append(f"Composite: {scores['composite']}")
-                if 'rerank' in scores:
-                    score_parts.append(f"Rerank: {scores['rerank']}")
-                if 'original' in scores:
-                    score_parts.append(f"Original: {scores['original']}")
-                markdown_sources += " | ".join(score_parts) + "\n"
-            
             # Metadata indicators
             metadata = source.get('metadata', {})
             indicators = []
@@ -748,6 +735,7 @@ Generate filename (base name only):
             # Update language highlighting based on file type
             def update_code_language(file_type):
                 language = "python" if file_type == "python" else "bash"
+
                 return gr.update(language=language)
 
             # Event handlers for chatbot tab
