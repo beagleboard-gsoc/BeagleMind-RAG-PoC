@@ -24,3 +24,7 @@ pandas
 
 # Web interface
 gradio
+
+click>=8.0.0
+rich>=12.0.0
+python-dotenv>=1.0.0

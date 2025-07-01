@@ -1,0 +1,2 @@
+[console_scripts]
+beaglemind = src.cli:cli

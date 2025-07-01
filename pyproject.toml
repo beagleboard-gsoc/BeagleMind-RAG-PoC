@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beaglemind-cli"
+version = "1.0.0"
+description = "Intelligent documentation assistant CLI for Beagleboard projects"
+authors = [
+    {name = "BeagleMind Team", email = "info@beagleboard.org"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+keywords = ["cli", "documentation", "AI", "RAG", "beagleboard"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers", 
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+dependencies = [
+    "click>=8.0.0",
+    "rich>=12.0.0",
+    "gradio>=4.0.0",
+    "pymilvus>=2.3.0",
+    "sentence-transformers>=2.2.0",
+    "langchain>=0.1.0",
+    "langchain-community>=0.0.10",
+    "groq>=0.4.0",
+    "python-dotenv>=1.0.0",
+    "numpy>=1.21.0",
+    "requests>=2.25.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.910"
+]
+
+[project.urls]
+Homepage = "https://github.com/beagleboard/beaglemind"
+Repository = "https://github.com/beagleboard/beaglemind"
+Documentation = "https://beaglemind.readthedocs.io"
+"Bug Tracker" = "https://github.com/beagleboard/beaglemind/issues"
+
+[project.scripts]
+beaglemind = "src.cli:cli"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.package-data]
+src = ["*.py"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
