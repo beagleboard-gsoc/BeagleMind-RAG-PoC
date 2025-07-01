@@ -75,6 +75,7 @@ class RetrievalSystem:
             FieldSchema(name="file_type", dtype=DataType.VARCHAR, max_length=50),
             FieldSchema(name="file_size", dtype=DataType.INT64),
             FieldSchema(name="source_link", dtype=DataType.VARCHAR, max_length=2000),
+            FieldSchema(name="github_url", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="raw_url", dtype=DataType.VARCHAR, max_length=2000),
             FieldSchema(name="blob_url", dtype=DataType.VARCHAR, max_length=2000),
             

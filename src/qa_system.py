@@ -169,19 +169,23 @@ class QASystem:
         # context_parts = context_parts[:5]  # Limit to top 5 documents
         context = "\n" + "="*50 + "\n".join(context_parts)
         # Use a single unified system prompt
-        system_prompt = '''You are an expert documentation assistant for the Beagleboard project and your name is BeagleMind.
+        system_prompt = '''You are BeagleMind, an expert documentation assistant for the Beagleboard project.
 
-Your goal is to provide highly accurate, detailed, and helpful answers using only the provided context documents. Invest extra effort to ensure your response is correct, clear, and directly addresses the user's question. 
+Provide accurate, helpful answers using only the provided context documents.
 
-**Instructions:**
-1. Carefully analyze the context and answer the user's question as accurately and concisely as possible.
-2. If the context contains images ("Raw URL"), display them using markdown: `![alt text](Raw URL)`.
-3. Use provided `Source Link` for file links: `[filename.md](Source Link)`.
-4. Display links and images when relevant.
-5. Do NOT fabricate links or information—only use those provided in the context.
-6. Do NOT include information that is not relevant to the user's query.
-7. Make your answer as helpful and complete as possible, but do not add unrelated details.
-'''
+**FORMATTING RULES:**
+- Use proper markdown: **bold**, `inline code`, ## headers
+- Code blocks with language: ```python or ```bash
+- Links: [text](url) - only use URLs from context
+- Images: ![alt](Raw_URL) when available
+- Lists: - bullet points or 1. numbered
+- No fabricated information
+
+**STRUCTURE:**
+1. Direct answer first
+2. Code examples when relevant  
+3. Links/references when helpful
+4. Keep responses clear and concise'''
         # print("CONEXT", context, "WFEE")
         prompt = f"""
 {system_prompt}
@@ -549,18 +553,47 @@ Refactored text with proper code formatting:
     def _validate_and_force_formatting(self, answer: str, original_question: str) -> str:
         """Validate and force consistent formatting for the answer"""
         try:
-            # Simple validation rules
-            if not answer.startswith('```'):
-                answer = '```\n' + answer  # Ensure starting code block
+            # Basic markdown validation and cleanup
+            lines = answer.split('\n')
+            cleaned_lines = []
             
-            if not answer.endswith('```'):
-                answer += '\n```'  # Ensure ending code block
+            for line in lines:
+                # Fix common markdown issues
+                line = line.strip()
+                
+                # Skip empty lines but preserve intentional spacing
+                if not line:
+                    cleaned_lines.append(line)
+                    continue
+                
+                # Ensure proper header formatting
+                if line.startswith('#'):
+                    # Ensure space after hash
+                    line = re.sub(r'^(#+)([^\s])', r'\1 \2', line)
+                
+                # Fix bold formatting
+                line = re.sub(r'\*\*([^*]+)\*\*', r'**\1**', line)
+                
+                # Fix inline code formatting
+                line = re.sub(r'`([^`]+)`', r'`\1`', line)
+                
+                # Fix bullet points
+                if line.startswith('-') and not line.startswith('- '):
+                    line = '- ' + line[1:].strip()
+                
+                cleaned_lines.append(line)
             
-            # Enforce single code block for simplicity
-            answer = re.sub(r'```(.+?)\n', r'```\1\n', answer)
-            answer = re.sub(r'```+', '```', answer)  # Remove extra backticks
+            # Join lines back together
+            cleaned_answer = '\n'.join(cleaned_lines)
             
-            return answer.strip()
+            # Remove excessive newlines (more than 2 consecutive)
+            cleaned_answer = re.sub(r'\n{3,}', '\n\n', cleaned_answer)
+            
+            # Ensure proper spacing around code blocks
+            cleaned_answer = re.sub(r'([^\n])\n```', r'\1\n\n```', cleaned_answer)
+            cleaned_answer = re.sub(r'```\n([^\n])', r'```\n\n\1', cleaned_answer)
+            
+            return cleaned_answer.strip()
         
         except Exception as e:
             logger.warning(f"Formatting validation failed: {e}")

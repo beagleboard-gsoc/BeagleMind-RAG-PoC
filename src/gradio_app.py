@@ -64,7 +64,7 @@ class GradioRAGApp:
         
         # Remove any remaining thinking patterns
         cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        
+        """
         # Remove empty code blocks (```\n\n``` or ```python\n\n```)
         # cleaned = re.sub(r'```(?:python|bash|shell)?\s*\n\s*\n\s*```', '', cleaned, flags=re.MULTILINE)
         
@@ -73,7 +73,7 @@ class GradioRAGApp:
         # cleaned = re.sub(r'^```(?:python|bash|shell)?\s*\n?', '', cleaned, flags=re.MULTILINE)
         
         # Remove closing code block delimiter (```)
-        cleaned = re.sub(r'\n?```\s*$', '', cleaned, flags=re.MULTILINE)
+        # cleaned = re.sub(r'\n?```\s*$', '', cleaned, flags=re.MULTILINE)
         
         # Remove explanatory text that comes after code blocks
         # Look for patterns like "This script will..." or "The script..." that appear after code
@@ -106,33 +106,37 @@ class GradioRAGApp:
         
         # Clean up extra whitespace
         cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
-        cleaned = cleaned.strip()
+        cleaned = cleaned.strip()"""
         
         return cleaned
     
     def format_sources(self, sources: List[dict]) -> str:
-        """Format source information as markdown with enhanced details"""
+        """Format source information as markdown with enhanced details, filtering out duplicates"""
         if not sources:
             return "No sources found."
         
+        # Filter out duplicate sources
+        unique_sources = self._filter_duplicate_sources(sources)
+        
+        if not unique_sources:
+            return "No unique sources found."
+        
         markdown_sources = "## Sources & References\n\n"
         
-        for i, source in enumerate(sources, start=1):
+        for i, source in enumerate(unique_sources, start=1):
             markdown_sources += f"### Source {i}\n"
             
             # File information
             file_name = source.get('file_name', 'Unknown')
-            file_path = source.get('file_path', '')
             file_type = source.get('file_type', 'unknown')
             language = source.get('language', 'unknown')
 
-            
+            source_link = source.get('source_link', '')
             markdown_sources += f"**File:** `{file_name}` ({file_type})\n"
-            if file_path:
-                markdown_sources += f"**Path:** `{file_path}`\n Link: [{file_name}](https://github.com/beagleboard/beagley-ai/tree/main/{file_path})"
             if language != 'unknown':
                 markdown_sources += f"**Language:** {language}\n"
-            
+            if source_link:
+                markdown_sources += f"**Source Link:** [{file_name}]({source_link})\n"
             # Metadata indicators
             metadata = source.get('metadata', {})
             indicators = []
@@ -140,23 +144,74 @@ class GradioRAGApp:
                 indicators.append("Code")
             if metadata.get('has_images'):
                 indicators.append("Images")
-            if metadata.get('quality_score'):
-                indicators.append(f"Quality: {metadata['quality_score']:.2f}")
             
             if indicators:
                 markdown_sources += f"**Contains:** {' | '.join(indicators)}\n"
-            
-            # Content preview with better formatting
-            content = source.get('content', '')
 
             
-            # Detect if content is code and format accordingly
-            if metadata.get('has_code') and language != 'unknown':
-                markdown_sources += f"**Content:**\n```{language}\n{content}\n```\n\n"
-            else:
-                markdown_sources += f"**Content:**\n```\n{content}\n```\n\n"
-            
         return markdown_sources
+    
+    def _filter_duplicate_sources(self, sources: List[dict]) -> List[dict]:
+        """Filter out duplicate sources based on content and metadata"""
+        unique_sources = []
+        seen_content = set()
+        seen_file_paths = set()
+        
+        for source in sources:
+            # Create a unique identifier for the source
+            content = source.get('content', '').strip()
+            file_name = source.get('file_name', '')
+            file_path = source.get('file_path', '')
+            
+            # Skip if we've seen identical content
+            if content and content in seen_content:
+                continue
+                
+            # Skip if it's the same file and path (exact duplicate)
+            file_identifier = f"{file_name}:{file_path}"
+            if file_identifier in seen_file_paths:
+                continue
+            
+            # For very similar content, check similarity
+            is_duplicate = False
+            for existing_content in seen_content:
+                if self._are_contents_similar(content, existing_content):
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_sources.append(source)
+                if content:
+                    seen_content.add(content)
+                seen_file_paths.add(file_identifier)
+        
+        return unique_sources
+    
+    def _are_contents_similar(self, content1: str, content2: str, similarity_threshold: float = 0.9) -> bool:
+        """Check if two content strings are very similar (likely duplicates)"""
+        if not content1 or not content2:
+            return False
+        
+        # If contents are identical
+        if content1 == content2:
+            return True
+        
+        # If one is a substring of the other with high overlap
+        shorter, longer = (content1, content2) if len(content1) < len(content2) else (content2, content1)
+        
+        # If shorter content is very short, use exact match
+        if len(shorter) < 100:
+            return shorter in longer
+        
+        # For longer content, check overlap percentage
+        overlap = len(set(shorter.split()) & set(longer.split()))
+        shorter_words = len(shorter.split())
+        
+        if shorter_words > 0:
+            similarity = overlap / shorter_words
+            return similarity >= similarity_threshold
+        
+        return False
     
     def format_search_info(self, search_info: dict) -> str:
         """Format search information for display"""
