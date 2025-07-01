@@ -66,11 +66,11 @@ class GradioRAGApp:
         cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
         
         # Remove empty code blocks (```\n\n``` or ```python\n\n```)
-        cleaned = re.sub(r'```(?:python|bash|shell)?\s*\n\s*\n\s*```', '', cleaned, flags=re.MULTILINE)
+        # cleaned = re.sub(r'```(?:python|bash|shell)?\s*\n\s*\n\s*```', '', cleaned, flags=re.MULTILINE)
         
         # Remove markdown code block delimiters from start and end
         # Remove opening code block delimiter (```python, ```bash, ```shell, or just ```)
-        cleaned = re.sub(r'^```(?:python|bash|shell)?\s*\n?', '', cleaned, flags=re.MULTILINE)
+        # cleaned = re.sub(r'^```(?:python|bash|shell)?\s*\n?', '', cleaned, flags=re.MULTILINE)
         
         # Remove closing code block delimiter (```)
         cleaned = re.sub(r'\n?```\s*$', '', cleaned, flags=re.MULTILINE)
