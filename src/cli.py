@@ -51,6 +51,10 @@ class BeagleMindCLI:
         self.qa_system = None
         self.config = self.load_config()
         
+        # Auto-initialize if previously configured
+        if self.config.get("initialized", False):
+            self._load_existing_systems()
+        
     def load_config(self) -> Dict[str, Any]:
         """Load CLI configuration from file"""
         default_config = {
@@ -84,6 +88,25 @@ class BeagleMindCLI:
         except Exception as e:
             console.print(f"[red]Error saving config: {e}[/red]")
     
+    def _load_existing_systems(self):
+        """Load existing systems if previously initialized"""
+        try:
+            collection_name = self.config.get("collection_name", "beaglemind_docs")
+            
+            # Initialize retrieval system
+            self.retrieval_system = RetrievalSystem(collection_name)
+            self.retrieval_system.create_collection(collection_name)
+            # Initialize QA system  
+            self.qa_system = QASystem(self.retrieval_system, collection_name)
+            
+        except Exception as e:
+            # If loading fails, mark as not initialized
+            console.print(f"[yellow]Warning: Could not load existing systems: {e}[/yellow]")
+            self.config["initialized"] = False
+            self.save_config()
+            self.retrieval_system = None
+            self.qa_system = None
+    
     def initialize_system(self, collection_name: str = None) -> bool:
         """Initialize the retrieval and QA systems"""
         try:
@@ -113,9 +136,24 @@ class BeagleMindCLI:
     
     def check_initialization(self) -> bool:
         """Check if the system is initialized"""
-        if not self.config.get("initialized", False) or not self.retrieval_system or not self.qa_system:
+        # First check if config says it's initialized
+        if not self.config.get("initialized", False):
             console.print("[yellow]⚠ BeagleMind is not initialized. Run 'beaglemind init' first.[/yellow]")
             return False
+        
+        # If config says initialized but objects are None, try to reload them
+        if not self.retrieval_system or not self.qa_system:
+            try:
+                self._load_existing_systems()
+            except Exception as e:
+                console.print(f"[yellow]⚠ Failed to reload systems: {e}. Run 'beaglemind init' again.[/yellow]")
+                return False
+        
+        # Final check
+        if not self.retrieval_system or not self.qa_system:
+            console.print("[yellow]⚠ BeagleMind is not initialized. Run 'beaglemind init' first.[/yellow]")
+            return False
+        
         return True
     
     def list_models(self, backend: str = None):
