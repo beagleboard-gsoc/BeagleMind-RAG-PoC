@@ -212,27 +212,7 @@ class RetrievalSystem:
                 # Fallback to basic fields
                 output_fields.extend(["source_url", "relevant_urls", "has_metadata", "chunk_index"])
         
-        # Build filter expression
-        filter_expr = None
-        if filters:
-            filter_conditions = []
-            for field, value in filters.items():
-                if isinstance(value, bool):
-                    filter_conditions.append(f"{field} == {str(value).lower()}")
-                elif isinstance(value, str):
-                    filter_conditions.append(f'{field} == "{value}"')
-                elif isinstance(value, (int, float)):
-                    filter_conditions.append(f"{field} == {value}")
-                elif isinstance(value, list):
-                    # For list values, use IN operator
-                    if all(isinstance(v, str) for v in value):
-                        value_str = ', '.join(f'"{v}"' for v in value)
-                        filter_conditions.append(f"{field} in [{value_str}]")
-            
-            if filter_conditions:
-                filter_expr = " and ".join(filter_conditions)
-                logger.info(f"Using filter: {filter_expr}")
-        
+
         # Perform search with higher limit for reranking
         search_limit = n_results * 3 if rerank else n_results
         
@@ -243,7 +223,7 @@ class RetrievalSystem:
                 search_params, 
                 limit=search_limit,
                 output_fields=output_fields,
-                expr=filter_expr
+                expr=None  # No expression filter for now
             )
         except Exception as e:
             logger.warning(f"Search with enhanced fields failed: {e}. Trying basic search.")
@@ -255,7 +235,6 @@ class RetrievalSystem:
                 search_params, 
                 limit=search_limit,
                 output_fields=basic_fields,
-                expr=filter_expr
             )
         
         # Process and format results

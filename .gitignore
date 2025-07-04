@@ -5,3 +5,4 @@ datasets
 src/__pycache__
 src/scraped_threads_complete.json
 src/filtered_threads.txt
+src/tools/__pycache__

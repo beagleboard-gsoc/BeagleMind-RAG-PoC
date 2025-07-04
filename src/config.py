@@ -18,6 +18,9 @@ GROQ_MODEL_NAME = "mixtral-8x7b-32768"  # or "llama2-70b-4096"
 # OpenAI (keeping for embeddings if needed)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# OpenRouter API configuration
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+
 # Vector Store Configuration
 VECTOR_STORE_PATH = "repository_content"
 EMBEDDINGS_MODEL = "BAAI/bge-m3"

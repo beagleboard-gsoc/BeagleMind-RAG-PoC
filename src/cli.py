@@ -36,7 +36,8 @@ GROQ_MODELS = [
     "llama-3.1-8b-instant", 
     "gemma2-9b-it",
     "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-4-maverick-17b-128e-instruct"
+    "meta-llama/llama-4-maverick-17b-128e-instruct", 
+    "deepseek-r1-distill-llama-70b"
 ]
 
 OLLAMA_MODELS = [
@@ -270,6 +271,9 @@ class BeagleMindCLI:
         try:
             # Show spinner while processing
             with console.status("[bold green]Searching knowledge base and generating response...", spinner="dots"):
+                # Suppress Groq retry logs during processing
+                logging.getLogger("groq._base_client").setLevel(logging.CRITICAL)
+                
                 result = self.qa_system.ask_question(
                     prompt,
                     search_strategy=search_strategy,
@@ -281,6 +285,13 @@ class BeagleMindCLI:
             answer = result.get("answer", "No answer generated.")
             sources = result.get("sources", [])
             search_info = result.get("search_info", {})
+            
+            # Check if the answer indicates a connection error
+            if answer and ("connectivity issues" in answer.lower() or 
+                          "rate limits" in answer.lower() or 
+                          "unable to process" in answer.lower()):
+                console.print(f"\n[yellow]⚠ {answer}[/yellow]")
+                return
             
             # Display answer
             console.print("\n" + "="*60)
@@ -336,7 +347,15 @@ class BeagleMindCLI:
                     console.print(source_panel)
             
         except Exception as e:
-            console.print(f"[red]Error during chat: {e}[/red]")
+            error_msg = str(e).lower()
+            if "connection" in error_msg or "timeout" in error_msg:
+                console.print(f"[red]⚠ Connection error: Unable to reach the AI service.[/red]")
+                console.print("[yellow]Please check your internet connection and try again.[/yellow]")
+            elif "rate" in error_msg and "limit" in error_msg:
+                console.print(f"[red]⚠ Rate limit exceeded: The AI service is currently busy.[/red]")
+                console.print("[yellow]Please wait a moment and try again.[/yellow]")
+            else:
+                console.print(f"[red]Error during chat: {e}[/red]")
             logger.error(f"Chat error: {e}", exc_info=True)
 
 # CLI Command Functions

@@ -5,8 +5,9 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
 from .config import GROQ_API_KEY
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+from .tools.enhanced_tool_registry import enhanced_tool_registry as tool_registry
+# Setup logging - suppress verbose output
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 class QASystem:
@@ -166,12 +167,31 @@ class QASystem:
             
             context_part += f"Content:\n{doc['text']}\n"
             context_parts.append(context_part)
-        # context_parts = context_parts[:5]  # Limit to top 5 documents
+        
         context = "\n" + "="*50 + "\n".join(context_parts)
-        # Use a single unified system prompt
+        # Use a single unified system prompt with tool awareness
         system_prompt = '''You are BeagleMind, an expert documentation assistant for the Beagleboard project.
 
 Provide accurate, helpful answers using only the provided context documents.
+
+**AVAILABLE TOOLS:**
+You have access to powerful file operation tools:
+- read_file: Read content from a single file
+- read_many_files: Read multiple files using patterns
+- edit_file: Edit files with various operations (replace, insert, append, etc.)
+- generate_code: Generate code files based on specifications
+
+Use these tools when users ask about:
+- Reading specific files or code examples
+- Modifying or creating code files
+- Generating new scripts or configurations
+- Examining multiple files at once
+
+**CODE EDITING RULES:**
+1. **Imports**: Add at top, group by standard→third-party→local, remove unused
+2. **Style**: Keep existing indentation/formatting, add docstrings for new functions
+3. **Safety**: Add try-catch blocks, validate inputs, handle errors gracefully
+4. **Documentation**: Comment complex logic, use type hints in Python
 
 **FORMATTING RULES:**
 - Use proper markdown: **bold**, `inline code`, ## headers
@@ -183,10 +203,17 @@ Provide accurate, helpful answers using only the provided context documents.
 
 **STRUCTURE:**
 1. Direct answer first
-2. Code examples when relevant  
-3. Links/references when helpful
-4. Keep responses clear and concise'''
-        # print("CONEXT", context, "WFEE")
+2. Use tools when appropriate for file operations
+3. Code examples when relevant  
+4. Links/references when helpful
+5. Keep responses clear and concise
+
+**SAFETY RULES:**
+- Never modify system files or critical configurations without explicit user consent
+- Validate file paths and permissions before editing
+- Provide clear explanations of what changes will be made
+- Ask for confirmation before making destructive changes'''
+        
         prompt = f"""
 {system_prompt}
 
@@ -205,52 +232,17 @@ Answer:
         return prompt
     
     def ask_question(self, question: str, search_strategy: str = "adaptive", 
-                    n_results: int = 5, include_context: bool = False, model_name: str = "llama-3-70b-8192", temperature: float = 0.3, llm_backend: str = "groq") -> Dict[str, Any]:
+                    n_results: int = 5, include_context: bool = False, model_name: str = "meta-llama/llama-4-scout-17b-16e-instruct", temperature: float = 0.3, llm_backend: str = "groq") -> Dict[str, Any]:
         """Enhanced question answering with adaptive search strategies"""
-        import groq
         # Detect question type for adaptive strategy
         question_types = self.detect_question_type(question)
-        logger.info(f"Detected question types: {question_types}")
         
         # Get search filters based on question
-        filters = self.get_search_filters(question, question_types)
-        logger.info(f"Applied filters: {filters}")
+        # filters = self.get_search_filters(question, question_types)
         
-        # Choose search strategy
-        if search_strategy == "adaptive":
-            if 'recent' in question_types:
-                search_results = self.retrieval_system.hybrid_search(
-                    question, n_results=n_results*2, boost_recent=True, filters=filters
-                )
-            elif 'code' in question_types:
-                search_results = self.retrieval_system.search_code_only(
-                    question, n_results=n_results*2
-                )
-            elif 'documentation' in question_types:
-                search_results = self.retrieval_system.search_documentation_only(
-                    question, n_results=n_results*2
-                )
-            else:
-                search_results = self.retrieval_system.search(
-                    question, n_results=n_results*2, filters=filters, rerank=True
-                )
-        
-        elif search_strategy == "multi_query":
-            # Generate related queries for multi-vector search
-            related_queries = self.generate_related_queries(question, question_types)
-            search_results = self.retrieval_system.multi_vector_search(
-                [question] + related_queries, n_results=n_results*2
-            )
-        
-        elif search_strategy == "context_aware":
-            search_results = self.retrieval_system.semantic_search_with_context(
-                question, context_window=2, n_results=n_results*2
-            )
-        
-        else:  # default
-            search_results = self.retrieval_system.search(
-                question, n_results=n_results*2, filters=filters
-            )
+        search_results = self.retrieval_system.search(
+            question, n_results=n_results*2, rerank=True
+        )
         
         if not search_results or not search_results['documents'][0]:
             return {
@@ -259,7 +251,7 @@ Answer:
                 "search_info": {
                     "strategy": search_strategy,
                     "question_types": question_types,
-                    "filters": filters,
+                    "filters": None,
                     "total_found": 0        
                 }
             }
@@ -274,7 +266,7 @@ Answer:
                 "search_info": {
                     "strategy": search_strategy,
                     "question_types": question_types,
-                    "filters": filters,
+                    "filters": None,
                     "total_found": 0
                 }
             }
@@ -284,7 +276,6 @@ Answer:
         
         # Get answer from LLM using selected backend
         try:
-            logger.info(f"Using {llm_backend} backend with model: {model_name}")
             if llm_backend.lower() == "groq":
                 answer = self._get_groq_response(prompt, model_name, temperature)
             elif llm_backend.lower() == "ollama":
@@ -293,7 +284,13 @@ Answer:
                 raise ValueError(f"Unsupported LLM backend: {llm_backend}")
             
             # Post-process the answer to ensure proper code formatting and clean markdown
-            answer = self._refactor_code_formatting(answer, llm_backend, model_name)
+            # Only do refactoring if we got a successful response (not an error message)
+            if not any(phrase in answer.lower() for phrase in ["connectivity issues", "rate limits", "unable to process"]):
+                try:
+                    answer = self._refactor_code_formatting(answer, llm_backend, model_name)
+                except Exception:
+                    pass  # Skip refactoring if it fails
+            
             answer = self._validate_and_force_formatting(answer, answer)
         
         except Exception as e:
@@ -331,7 +328,7 @@ Answer:
             "search_info": {
                 "strategy": search_strategy,
                 "question_types": question_types,
-                "filters": filters,
+                "filters": None,
                 "total_found": search_results.get('total_found', 0),
                 "reranked_count": len(reranked_docs)
             }
@@ -429,7 +426,6 @@ Answer:
         results = []
         
         for i, question in enumerate(questions):
-            logger.info(f"Processing question {i+1}/{len(questions)}: {question[:50]}...")
             try:
                 result = self.ask_question(question, search_strategy=search_strategy)
                 result['question_id'] = i
@@ -452,15 +448,156 @@ Answer:
         }
     
     def _get_groq_response(self, prompt: str, model_name: str, temperature: float) -> str:
-        """Get response from Groq API"""
-        import groq
-        client = groq.Groq(api_key=GROQ_API_KEY)
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature
+        """Get response from Groq API with function calling support and robust error handling"""
+        from openai import OpenAI
+        import time
+        
+        # Initialize OpenAI client with Groq base URL
+        client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+            timeout=30.0  # 30 second timeout
         )
-        return completion.choices[0].message.content
+        
+        # Get available tools for function calling
+        tools = tool_registry.get_all_tool_definitions()
+        
+        max_retries = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                # Try function calling first if tools are available
+                if tools:
+                    try:
+                        completion = client.chat.completions.create(
+                            model=model_name,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=temperature,
+                            tools=tools,
+                            tool_choice="auto",
+                            timeout=25.0
+                        )
+                        
+                        response_message = completion.choices[0].message
+                        
+                        # Check if the model wants to call any tools
+                        if response_message.tool_calls:
+                            # Log tool calls for debugging
+                            logger.info(f"LLM is calling {len(response_message.tool_calls)} tools:")
+                            for tc in response_message.tool_calls:
+                                logger.info(f"  - {tc.function.name}: {tc.function.arguments}")
+                            
+                            # Execute the tool calls
+                            tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
+                            
+                            # Log tool results for debugging
+                            for i, result in enumerate(tool_results):
+                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
+                                logger.info(f"Tool {i+1} result - Success: {success}")
+                                if not success and isinstance(result["result"], dict):
+                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
+                            
+                            # Prepare proper message history for second call
+                            messages = [
+                                {"role": "user", "content": prompt},
+                                {
+                                    "role": "assistant",
+                                    "content": response_message.content,
+                                    "tool_calls": [
+                                        {
+                                            "id": tc.id,
+                                            "type": tc.type,
+                                            "function": {
+                                                "name": tc.function.name,
+                                                "arguments": tc.function.arguments
+                                            }
+                                        } for tc in response_message.tool_calls
+                                    ]
+                                }
+                            ]
+                            
+                            # Add tool results as messages
+                            for tool_result in tool_results:
+                                tool_content = tool_result["result"]
+                                
+                                # Handle different result types properly
+                                if isinstance(tool_content, dict):
+                                    if tool_content.get("success", True):
+                                        content_str = tool_content.get("content", str(tool_content))
+                                    else:
+                                        content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
+                                elif isinstance(tool_content, str):
+                                    content_str = tool_content
+                                else:
+                                    content_str = str(tool_content)
+                                
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_result["tool_call_id"],
+                                    "content": content_str
+                                })
+                            
+                            # Second call with tool results
+                            final_completion = client.chat.completions.create(
+                                model=model_name,
+                                messages=messages,
+                                temperature=temperature,
+                                timeout=30.0
+                            )
+                            
+                            return final_completion.choices[0].message.content
+                        else:
+                            # No tool calls, return the original response
+                            return response_message.content or "I understand your question but couldn't generate a response."
+                            
+                    except Exception as tool_error:
+                        logger.warning(f"Tool calling failed: {tool_error}")
+                        # Fall through to regular completion without tools
+                
+                # Regular completion without tools (fallback)
+                completion = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    timeout=25.0
+                )
+                return completion.choices[0].message.content or "I couldn't generate a response to your question."
+                    
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+                    continue
+                else:
+                    # Final attempt failed, analyze error type and return appropriate message
+                    error_msg = str(e).lower()
+                    
+                    error_type = type(e).__name__.lower()
+                    
+                    # Check for rate limit errors
+                    if ("rate" in error_msg and "limit" in error_msg) or "429" in error_msg or "rate_limit" in error_msg:
+                        return "I'm experiencing rate limits from the AI service. Please wait a moment and try again."
+                    
+                    # Check for connection/network errors
+                    elif (error_type in ["connectionerror", "timeouterror", "httperror"] or 
+                          "connection" in error_msg or "timeout" in error_msg or 
+                          "network" in error_msg or "dns" in error_msg or 
+                          "unreachable" in error_msg or "refused" in error_msg):
+                        return "I'm having connectivity issues. Please check your internet connection and try again."
+                    
+                    # Check for authentication errors
+                    elif "401" in error_msg or "unauthorized" in error_msg or "invalid" in error_msg and "key" in error_msg:
+                        return "Authentication error. Please check your API key configuration."
+                    
+                    # Check for service unavailable errors
+                    elif "503" in error_msg or "502" in error_msg or "500" in error_msg or "service unavailable" in error_msg:
+                        return "The AI service is temporarily unavailable. Please try again later."
+                    
+                    # Generic error for unknown issues
+                    else:
+                        return f"I'm unable to process your request right now. Please try again later."
     
     def _get_ollama_response(self, prompt: str, model_name: str, temperature: float) -> str:
         """Get response from Ollama API"""
@@ -479,18 +616,20 @@ Answer:
             }
         }
         
-        logger.info(f"Calling Ollama with model: {model_name}")
         response = requests.post(ollama_url, json=payload, timeout=120)
         response.raise_for_status()
         
         result = response.json()
-        logger.info(f"Ollama response received (length: {len(result.get('response', ''))} chars)")
         return result.get("response", "No response generated")
     
 
       
     def _refactor_code_formatting(self, answer: str, llm_backend: str, model_name: str) -> str:
         """Post-process the answer to ensure proper code snippet formatting using the chosen LLM backend"""
+        # Skip refactoring if the answer indicates connection issues
+        if any(phrase in answer.lower() for phrase in ["connectivity issues", "rate limits", "unable to process", "connection error"]):
+            return answer
+            
         try:
             refactor_prompt = f"""
 You are a markdown formatting expert. Your task is to refactor the given text to ensure all code snippets are properly formatted with correct markdown syntax.
@@ -511,12 +650,16 @@ Refactored text with proper code formatting:
 """
 
             if llm_backend.lower() == "groq":
-                import groq
-                client = groq.Groq(api_key=GROQ_API_KEY)
+                from openai import OpenAI
+                client = OpenAI(
+                    api_key=GROQ_API_KEY,
+                    base_url="https://api.groq.com/openai/v1",
+                    timeout=10.0  # Shorter timeout for refactoring
+                )
                 completion = client.chat.completions.create(
-                    model=model_name,  # Use faster model for formatting
+                    model=model_name,
                     messages=[{"role": "user", "content": refactor_prompt}],
-                    temperature=0.1  # Low temperature for consistent formatting
+                    temperature=0.1
                 )
                 refactored_answer = completion.choices[0].message.content
                 
@@ -526,29 +669,27 @@ Refactored text with proper code formatting:
                 
                 ollama_url = "http://localhost:11434/api/generate"
                 payload = {
-                    "model": model_name,  # Use the same model as the main response
+                    "model": model_name,
                     "prompt": refactor_prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.1  # Low temperature for consistent formatting
+                        "temperature": 0.1
                     }
                 }
                 
-                response = requests.post(ollama_url, json=payload, timeout=60)
+                response = requests.post(ollama_url, json=payload, timeout=15)  # Shorter timeout
                 response.raise_for_status()
                 result = response.json()
                 refactored_answer = result.get("response", answer)
             
             else:
-                logger.warning(f"Unsupported backend for refactoring: {llm_backend}")
                 return answer
             
-            logger.info(f"Successfully refactored code formatting using {llm_backend}")
             return refactored_answer
             
         except Exception as e:
-            logger.warning(f"Code formatting refactoring failed: {e}")
-            return answer  # Return original answer if refactoring fails
+            # Silently return original answer if refactoring fails
+            return answer
     
     def _validate_and_force_formatting(self, answer: str, original_question: str) -> str:
         """Validate and force consistent formatting for the answer"""
