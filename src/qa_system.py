@@ -1,11 +1,12 @@
 from sentence_transformers import CrossEncoder
 import json
 import logging
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
 from .config import GROQ_API_KEY
-from .tools.enhanced_tool_registry import enhanced_tool_registry as tool_registry
+from .tools.enhanced_tool_registry_dynamic import enhanced_tool_registry as tool_registry
 # Setup logging - suppress verbose output
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -33,48 +34,6 @@ class QASystem:
             'recent': [r'\blatest\b', r'\brecent\b', r'\bnew\b', r'\bupdated\b', r'\bcurrent\b']
         }
     
-    def detect_question_type(self, question: str) -> List[str]:
-        """Detect the type of question to optimize search strategy"""
-        question_lower = question.lower()
-        detected_types = []
-        
-        for qtype, patterns in self.question_patterns.items():
-            if any(re.search(pattern, question_lower) for pattern in patterns):
-                detected_types.append(qtype)
-        
-        return detected_types if detected_types else ['general']
-    
-    def get_search_filters(self, question: str, question_types: List[str]) -> Dict[str, Any]:
-        """Generate search filters based on question content and type"""
-        filters = {}
-        question_lower = question.lower()
-        
-        # Language-specific filters
-        languages = ['python', 'javascript', 'java', 'cpp', 'c++', 'go', 'rust', 'typescript']
-        for lang in languages:
-            if lang in question_lower:
-                filters['language'] = lang
-                break
-        
-        # Content type filters
-        if 'code' in question_types:
-            filters['has_code'] = True
-        elif 'documentation' in question_types:
-            filters['has_documentation'] = True
-        
-        # File type filters
-        file_extensions = {
-            'readme': ['md', 'txt'],
-            'config': ['json', 'yaml', 'yml', 'toml'],
-            'script': ['py', 'js', 'sh', 'bat']
-        }
-        
-        for keyword, extensions in file_extensions.items():
-            if keyword in question_lower:
-                filters['file_type'] = extensions[0]  # Use first extension as primary
-                break
-        
-        return filters
     
     def rerank_documents(self, query: str, search_results: Dict[str, Any], top_k: int = 10) -> List[Dict[str, Any]]:
         """Enhanced reranking with cross-encoder and custom scoring"""
@@ -175,17 +134,25 @@ class QASystem:
 Provide accurate, helpful answers using only the provided context documents.
 
 **AVAILABLE TOOLS:**
-You have access to powerful file operation tools:
-- read_file: Read content from a single file
-- read_many_files: Read multiple files using patterns
-- edit_file: Edit files with various operations (replace, insert, append, etc.)
-- generate_code: Generate code files based on specifications
+You have access to powerful file operation tools that you MUST use when appropriate:
+- read_file(file_path): Read content from a single file
+- create_file(file_path, content): Create a new file with specified content  
+- write_file(file_path, content): Write content to a file (overwrites existing)
+- replace_text(file_path, old_text, new_text): Replace specific text in files
+- insert_at_line(file_path, line_number, text): Insert text at specific line numbers
 
-Use these tools when users ask about:
-- Reading specific files or code examples
-- Modifying or creating code files
-- Generating new scripts or configurations
-- Examining multiple files at once
+**WHEN TO USE TOOLS:**
+- User asks to "create", "make", "generate" files → USE create_file or write_file
+- User asks to "read", "show", "display" file contents → USE read_file
+- User asks to "modify", "edit", "change" files → USE replace_text or insert_at_line
+- User mentions specific file paths → USE appropriate file tools
+- User wants code examples saved → USE create_file
+
+**IMPORTANT TOOL USAGE RULES:**
+1. **File Creation First**: Always use create_file to create a new file before trying to modify it
+2. **One Operation Per Tool Call**: Don't chain operations - create file first, then modify if needed
+3. **Check File Existence**: Use create_file for new files, write_file for existing files
+4. **Simple Over Complex**: Prefer create_file with complete content over multiple insert_at_line calls
 
 **CODE EDITING RULES:**
 1. **Imports**: Add at top, group by standard→third-party→local, remove unused
@@ -201,9 +168,9 @@ Use these tools when users ask about:
 - Lists: - bullet points or 1. numbered
 - No fabricated information
 
-**STRUCTURE:**
+**RESPONSE STRUCTURE:**
 1. Direct answer first
-2. Use tools when appropriate for file operations
+2. **USE TOOLS** when appropriate for file operations
 3. Code examples when relevant  
 4. Links/references when helpful
 5. Keep responses clear and concise
@@ -235,7 +202,6 @@ Answer:
                     n_results: int = 5, include_context: bool = False, model_name: str = "meta-llama/llama-4-scout-17b-16e-instruct", temperature: float = 0.3, llm_backend: str = "groq") -> Dict[str, Any]:
         """Enhanced question answering with adaptive search strategies"""
         # Detect question type for adaptive strategy
-        question_types = self.detect_question_type(question)
         
         # Get search filters based on question
         # filters = self.get_search_filters(question, question_types)
@@ -250,7 +216,7 @@ Answer:
                 "sources": [],
                 "search_info": {
                     "strategy": search_strategy,
-                    "question_types": question_types,
+                    "question_types": None,
                     "filters": None,
                     "total_found": 0        
                 }
@@ -265,14 +231,14 @@ Answer:
                 "sources": [],
                 "search_info": {
                     "strategy": search_strategy,
-                    "question_types": question_types,
+                    "question_types": None,
                     "filters": None,
                     "total_found": 0
                 }
             }
         
         # Generate context-aware prompt
-        prompt = self.generate_context_aware_prompt(question, reranked_docs, question_types)
+        prompt = self.generate_context_aware_prompt(question, reranked_docs, None)
         
         # Get answer from LLM using selected backend
         try:
@@ -291,7 +257,6 @@ Answer:
                 except Exception:
                     pass  # Skip refactoring if it fails
             
-            answer = self._validate_and_force_formatting(answer, answer)
         
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
@@ -327,124 +292,11 @@ Answer:
             "sources": sources,
             "search_info": {
                 "strategy": search_strategy,
-                "question_types": question_types,
+                "question_types": None,
                 "filters": None,
                 "total_found": search_results.get('total_found', 0),
                 "reranked_count": len(reranked_docs)
             }
-        }
-    
-    def generate_related_queries(self, question: str, question_types: List[str]) -> List[str]:
-        """Generate related queries for multi-vector search"""
-        related_queries = []
-        
-        # Extract key terms
-        key_terms = re.findall(r'\b\w+\b', question.lower())
-        key_terms = [term for term in key_terms if len(term) > 3]
-        
-        if 'code' in question_types:
-            related_queries.extend([
-                f"implement {' '.join(key_terms[:3])}",
-                f"example {' '.join(key_terms[:2])}",
-                f"function {' '.join(key_terms[:2])}"
-            ])
-        
-        if 'documentation' in question_types:
-            related_queries.extend([
-                f"guide {' '.join(key_terms[:2])}",
-                f"tutorial {' '.join(key_terms[:2])}"
-            ])
-        
-        if 'troubleshooting' in question_types:
-            related_queries.extend([
-                f"fix {' '.join(key_terms[:2])}",
-                f"solve {' '.join(key_terms[:2])}"
-            ])
-        
-        return related_queries[:3]  # Limit to 3 related queries
-    
-    def get_question_suggestions(self, query: str = "", n_suggestions: int = 5) -> List[str]:
-        """Generate question suggestions based on the collection content"""
-        try:
-            # Get collection stats to understand available content
-            stats = self.retrieval_system.get_collection_stats()
-            
-            suggestions = []
-            
-            # Language-based suggestions
-            if 'languages' in stats:
-                top_languages = list(stats['languages'].keys())[:3]
-                for lang in top_languages:
-                    suggestions.append(f"How do I implement authentication in {lang}?")
-                    suggestions.append(f"What are best practices for {lang} development?")
-            
-            # Repository-based suggestions
-            if 'repositories' in stats:
-                top_repos = list(stats['repositories'].keys())[:2]
-                for repo in top_repos:
-                    suggestions.append(f"How does {repo} handle configuration?")
-                    suggestions.append(f"What is the architecture of {repo}?")
-            
-            # General suggestions based on content
-            if stats.get('chunks_with_code', 0) > 0:
-                suggestions.extend([
-                    "Show me examples of API implementations",
-                    "How to handle errors and exceptions?",
-                    "What are common design patterns used?"
-                ])
-            
-            if stats.get('chunks_with_images', 0) > 0:
-                suggestions.extend([
-                    "Show me documentation with diagrams",
-                    "What visual examples are available?"
-                ])
-            
-            # Generic helpful suggestions
-            suggestions.extend([
-                "How to get started with this codebase?",
-                "What are the main components and their relationships?",
-                "Where can I find configuration examples?",
-                "How to run tests and validate changes?",
-                "What are the deployment procedures?"
-            ])
-            
-            return suggestions[:n_suggestions]
-            
-        except Exception as e:
-            logger.warning(f"Could not generate suggestions: {e}")
-            return [
-                "How do I get started?",
-                "Show me code examples",
-                "What are best practices?",
-                "How to troubleshoot common issues?",
-                "Where is the documentation?"
-            ]
-    
-    def batch_question_answering(self, questions: List[str], 
-                                search_strategy: str = "adaptive") -> Dict[str, Any]:
-        """Answer multiple questions efficiently"""
-        results = []
-        
-        for i, question in enumerate(questions):
-            try:
-                result = self.ask_question(question, search_strategy=search_strategy)
-                result['question_id'] = i
-                result['question'] = question
-                results.append(result)
-            except Exception as e:
-                logger.error(f"Failed to process question {i+1}: {e}")
-                results.append({
-                    'question_id': i,
-                    'question': question,
-                    'answer': f"Error processing question: {str(e)}",
-                    'sources': [],
-                    'search_info': {}
-                })
-        
-        return {
-            'results': results,
-            'total_questions': len(questions),
-            'successful_answers': len([r for r in results if not r['answer'].startswith('Error')])
         }
     
     def _get_groq_response(self, prompt: str, model_name: str, temperature: float) -> str:
@@ -483,20 +335,8 @@ Answer:
                         
                         # Check if the model wants to call any tools
                         if response_message.tool_calls:
-                            # Log tool calls for debugging
-                            logger.info(f"LLM is calling {len(response_message.tool_calls)} tools:")
-                            for tc in response_message.tool_calls:
-                                logger.info(f"  - {tc.function.name}: {tc.function.arguments}")
-                            
                             # Execute the tool calls
                             tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
-                            
-                            # Log tool results for debugging
-                            for i, result in enumerate(tool_results):
-                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
-                                logger.info(f"Tool {i+1} result - Success: {success}")
-                                if not success and isinstance(result["result"], dict):
-                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
                             
                             # Prepare proper message history for second call
                             messages = [
@@ -600,30 +440,373 @@ Answer:
                         return f"I'm unable to process your request right now. Please try again later."
     
     def _get_ollama_response(self, prompt: str, model_name: str, temperature: float) -> str:
-        """Get response from Ollama API"""
-        import requests
-        import json
+        """Enhanced Ollama API response using OpenAI-compatible endpoint (recommended approach)"""
+        import time
+        import os
         
-        # Ollama API endpoint (default local)
-        ollama_url = "http://localhost:11434/api/generate"
+        # Get available tools for function calling
+        tools = tool_registry.get_all_tool_definitions()
         
-        payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature
-            }
-        }
+        max_retries = 3
+        base_delay = 1.0
         
-        response = requests.post(ollama_url, json=payload, timeout=120)
-        response.raise_for_status()
+        for attempt in range(max_retries):
+            try:
+                # Method 1: OpenAI SDK with Ollama (RECOMMENDED by Ollama)
+                if tools and self._ollama_supports_tools(model_name):
+                    try:
+                        logger.info(f"Using OpenAI SDK with Ollama endpoint - {len(tools)} tools available")
+                        
+                        # Use OpenAI SDK exactly as shown in Ollama documentation
+                        from openai import OpenAI
+                        
+                        # This follows the exact pattern from Ollama's official docs
+                        client = OpenAI(
+                            base_url="http://localhost:11434/v1",
+                            api_key="ollama",  # Ollama uses 'ollama' as the API key
+                            timeout=60.0
+                        )
+                        
+                        # First call with tools
+                        completion = client.chat.completions.create(
+                            model=model_name,
+                            messages=[{"role": "user", "content": prompt}],
+                            tools=tools,
+                            tool_choice="auto",
+                            temperature=temperature
+                        )
+                        
+                        response_message = completion.choices[0].message
+                        
+                        # Check if the model wants to call any tools
+                        if response_message.tool_calls:
+                            logger.info(f"Ollama (OpenAI SDK) calling {len(response_message.tool_calls)} tools:")
+                            for tc in response_message.tool_calls:
+                                logger.info(f"  - {tc.function.name}: {tc.function.arguments}")
+                            
+                            # Execute the tool calls using our enhanced registry
+                            tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
+                            
+                            # Log tool results for debugging
+                            for i, result in enumerate(tool_results):
+                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
+                                logger.info(f"Tool {i+1} result - Success: {success}")
+                                if not success and isinstance(result["result"], dict):
+                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
+                                else:
+                                    logger.info(f"Tool {i+1} executed successfully")
+                            
+                            # Check if any files were actually created for debugging
+                            for result in tool_results:
+                                if isinstance(result["result"], dict) and "file_path" in result["result"]:
+                                    file_path = result["result"]["file_path"]
+                                    if os.path.exists(file_path):
+                                        logger.info(f"✅ File confirmed created: {file_path}")
+                                    else:
+                                        logger.warning(f"❌ File not found after creation: {file_path}")
+                            
+                            # Prepare proper message history for second call (standard OpenAI format)
+                            messages = [
+                                {"role": "user", "content": prompt},
+                                {
+                                    "role": "assistant",
+                                    "content": response_message.content,
+                                    "tool_calls": [
+                                        {
+                                            "id": tc.id,
+                                            "type": tc.type,
+                                            "function": {
+                                                "name": tc.function.name,
+                                                "arguments": tc.function.arguments
+                                            }
+                                        } for tc in response_message.tool_calls
+                                    ]
+                                }
+                            ]
+                            
+                            # Add tool results as messages (standard OpenAI format)
+                            for tool_result in tool_results:
+                                tool_content = tool_result["result"]
+                                
+                                # Handle different result types properly
+                                if isinstance(tool_content, dict):
+                                    if tool_content.get("success", True):
+                                        content_str = tool_content.get("content", str(tool_content))
+                                    else:
+                                        content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
+                                elif isinstance(tool_content, str):
+                                    content_str = tool_content
+                                else:
+                                    content_str = str(tool_content)
+                                
+                                # Standard OpenAI tool message format
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_result["tool_call_id"],
+                                    "content": content_str
+                                })
+                            
+                            # Second call with tool results using OpenAI SDK
+                            final_completion = client.chat.completions.create(
+                                model=model_name,
+                                messages=messages,
+                                temperature=temperature
+                            )
+                            
+                            return final_completion.choices[0].message.content
+                        else:
+                            # No tool calls, return the original response
+                            return response_message.content or "I understand your question but couldn't generate a response."
+                            
+                    except Exception as openai_error:
+                        logger.warning(f"OpenAI SDK with Ollama failed: {openai_error}")
+                        # Fall through to native API as backup
+                
+                # Method 2: Fallback to native Ollama API (only if OpenAI SDK fails)
+                if tools and self._ollama_supports_tools(model_name):
+                    try:
+                        import requests
+                        import json
+                        
+                        logger.info(f"Falling back to native Ollama API with {len(tools)} tools")
+                        
+                        ollama_native_url = "http://localhost:11434/api/chat"
+                        
+                        # First call with tools using native API
+                        payload = {
+                            "model": model_name,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "tools": tools,
+                            "stream": False,
+                            "options": {
+                                "temperature": temperature,
+                                "num_ctx": 4096,  # Increase context for tool calling
+                                "num_predict": 2048
+                            }
+                        }
+                        
+                        response = requests.post(ollama_native_url, json=payload, timeout=120)
+                        response.raise_for_status()
+                        
+                        result = response.json()
+                        response_message = result.get("message", {})
+                        
+                        # Check if the model wants to call any tools
+                        if "tool_calls" in response_message and response_message["tool_calls"]:
+                            logger.info(f"Ollama (native API) calling {len(response_message['tool_calls'])} tools:")
+                            for tc in response_message["tool_calls"]:
+                                logger.info(f"  - {tc['function']['name']}: {tc['function']['arguments']}")
+                            
+                            # Convert tool calls to expected format and execute
+                            tool_calls = self._convert_ollama_tool_calls(response_message["tool_calls"])
+                            tool_results = tool_registry.parse_tool_calls(tool_calls)
+                            
+                            # Log tool results
+                            for i, result in enumerate(tool_results):
+                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
+                                logger.info(f"Tool {i+1} result - Success: {success}")
+                                if not success and isinstance(result["result"], dict):
+                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
+                            
+                            # Prepare messages for second call with tool results
+                            messages = [
+                                {"role": "user", "content": prompt},
+                                {
+                                    "role": "assistant", 
+                                    "content": response_message.get("content", ""),
+                                    "tool_calls": response_message["tool_calls"]
+                                }
+                            ]
+                            
+                            # Add tool results as messages (native format)
+                            for tool_result in tool_results:
+                                tool_content = tool_result["result"]
+                                
+                                if isinstance(tool_content, dict):
+                                    if tool_content.get("success", True):
+                                        content_str = tool_content.get("content", str(tool_content))
+                                    else:
+                                        content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
+                                elif isinstance(tool_content, str):
+                                    content_str = tool_content
+                                else:
+                                    content_str = str(tool_content)
+                                
+                                messages.append({
+                                    "role": "tool",
+                                    "content": content_str
+                                })
+                            
+                            # Second call with tool results
+                            final_payload = {
+                                "model": model_name,
+                                "messages": messages,
+                                "stream": False,
+                                "options": {
+                                    "temperature": temperature,
+                                    "num_ctx": 4096,
+                                    "num_predict": 2048
+                                }
+                            }
+                            
+                            final_response = requests.post(ollama_native_url, json=final_payload, timeout=120)
+                            final_response.raise_for_status()
+                            
+                            final_result = final_response.json()
+                            return final_result.get("message", {}).get("content", "I couldn't generate a response.")
+                        else:
+                            # No tool calls, return the original response
+                            return response_message.get("content", "I understand your question but couldn't generate a response.")
+                            
+                    except Exception as native_error:
+                        logger.warning(f"Native Ollama API also failed: {native_error}")
+                        # Fall through to regular completion without tools
+                
+                # Method 3: Regular completion without tools (final fallback)
+                logger.info("Falling back to regular completion without tools")
+                
+                # Try OpenAI SDK first for regular completion
+                try:
+                    from openai import OpenAI
+                    
+                    client = OpenAI(
+                        base_url="http://localhost:11434/v1",
+                        api_key="ollama",
+                        timeout=30.0
+                    )
+                    
+                    completion = client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature
+                    )
+                    
+                    return completion.choices[0].message.content or "No response generated"
+                    
+                except Exception as sdk_error:
+                    logger.warning(f"OpenAI SDK regular completion failed: {sdk_error}")
+                    
+                    # Final fallback to native API
+                    import requests
+                    
+                    ollama_native_url = "http://localhost:11434/api/chat"
+                    payload = {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                        "options": {
+                            "temperature": temperature,
+                            "num_ctx": 4096,
+                            "num_predict": 2048
+                        }
+                    }
+                    
+                    response = requests.post(ollama_native_url, json=payload, timeout=120)
+                    response.raise_for_status()
+                    
+                    result = response.json()
+                    return result.get("message", {}).get("content", "No response generated")
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff
+                    delay = base_delay * (2 ** attempt)
+                    time.sleep(delay)
+                    continue
+                else:
+                    # Final attempt failed, analyze error type and return appropriate message
+                    error_msg = str(e).lower()
+                    
+                    # Check for connection/network errors
+                    if ("connection" in error_msg or "timeout" in error_msg or 
+                        "network" in error_msg or "refused" in error_msg):
+                        return "I'm having connectivity issues with Ollama. Please ensure Ollama is running and try again."
+                    
+                    # Check for model not found
+                    elif "not found" in error_msg or "404" in error_msg:
+                        return f"Model '{model_name}' not found in Ollama. Please check if the model is installed."
+                    
+                    # Check for service unavailable
+                    elif "503" in error_msg or "502" in error_msg or "500" in error_msg:
+                        return "Ollama service is temporarily unavailable. Please try again later."
+                    
+                    # Generic error
+                    else:
+                        return f"I'm unable to process your request with Ollama right now. Please try again later."
+    
+    def _ollama_supports_tools(self, model_name: str) -> bool:
+        """Check if the Ollama model supports tool calling"""
+        # Updated based on official Ollama tool support documentation
+        # https://ollama.com/blog/tool-support
+        tool_supporting_models = [
+            # Core supported models from Ollama documentation
+            "llama3.1", "llama3.2", "llama3.3",
+            "mistral", "mistral-nemo", 
+            "firefunction-v2",
+            "command-r", "command-r-plus",
+            
+            # Additional models with tool support
+            "mixtral", "codellama", "deepseek-coder", 
+            "qwen", "qwen2", "qwen2.5", "qwen-coder",
+            "phi3", "phi3.5", "gemma2", "granite",
+            "hermes", "solar", "wizard", "openchat"
+        ]
         
-        result = response.json()
-        return result.get("response", "No response generated")
+        model_lower = model_name.lower()
+        
+        # Check if any of the supported model names are in the model string
+        is_supported = any(supported in model_lower for supported in tool_supporting_models)
+        
+        if is_supported:
+            logger.info(f"Model {model_name} supports tool calling")
+        else:
+            logger.warning(f"Model {model_name} may not support tool calling. Supported models: {', '.join(tool_supporting_models[:5])}...")
+        
+        return is_supported
+    
+    def _convert_ollama_tool_calls(self, ollama_tool_calls):
+        """Convert Ollama tool call format to expected format with better ID handling"""
+        class ToolCall:
+            def __init__(self, tool_call_data):
+                # Generate a consistent ID based on function name and arguments
+                func_name = tool_call_data.get("function", {}).get("name", "unknown")
+                func_args = tool_call_data.get("function", {}).get("arguments", "{}")
+                
+                # Use provided ID or generate one
+                if "id" in tool_call_data:
+                    self.id = tool_call_data["id"]
+                else:
+                    # Generate a deterministic ID
+                    import hashlib
+                    id_source = f"{func_name}_{func_args}"
+                    self.id = f"call_{hashlib.md5(id_source.encode()).hexdigest()[:8]}"
+                
+                self.type = "function"
+                self.function = ToolCallFunction(tool_call_data["function"])
+        
+        class ToolCallFunction:
+            def __init__(self, function_data):
+                self.name = function_data["name"]
+                self.arguments = function_data.get("arguments", "{}")
+                
+                # Ensure arguments is a string
+                if isinstance(self.arguments, dict):
+                    import json
+                    self.arguments = json.dumps(self.arguments)
+        
+        converted_calls = []
+        for tc in ollama_tool_calls:
+            try:
+                converted_call = ToolCall(tc)
+                converted_calls.append(converted_call)
+                logger.info(f"Converted tool call: {converted_call.function.name} with ID {converted_call.id}")
+            except Exception as e:
+                logger.error(f"Failed to convert tool call {tc}: {e}")
+                continue
+        
+        return converted_calls
     
 
-      
     def _refactor_code_formatting(self, answer: str, llm_backend: str, model_name: str) -> str:
         """Post-process the answer to ensure proper code snippet formatting using the chosen LLM backend"""
         # Skip refactoring if the answer indicates connection issues
@@ -691,51 +874,3 @@ Refactored text with proper code formatting:
             # Silently return original answer if refactoring fails
             return answer
     
-    def _validate_and_force_formatting(self, answer: str, original_question: str) -> str:
-        """Validate and force consistent formatting for the answer"""
-        try:
-            # Basic markdown validation and cleanup
-            lines = answer.split('\n')
-            cleaned_lines = []
-            
-            for line in lines:
-                # Fix common markdown issues
-                line = line.strip()
-                
-                # Skip empty lines but preserve intentional spacing
-                if not line:
-                    cleaned_lines.append(line)
-                    continue
-                
-                # Ensure proper header formatting
-                if line.startswith('#'):
-                    # Ensure space after hash
-                    line = re.sub(r'^(#+)([^\s])', r'\1 \2', line)
-                
-                # Fix bold formatting
-                line = re.sub(r'\*\*([^*]+)\*\*', r'**\1**', line)
-                
-                # Fix inline code formatting
-                line = re.sub(r'`([^`]+)`', r'`\1`', line)
-                
-                # Fix bullet points
-                if line.startswith('-') and not line.startswith('- '):
-                    line = '- ' + line[1:].strip()
-                
-                cleaned_lines.append(line)
-            
-            # Join lines back together
-            cleaned_answer = '\n'.join(cleaned_lines)
-            
-            # Remove excessive newlines (more than 2 consecutive)
-            cleaned_answer = re.sub(r'\n{3,}', '\n\n', cleaned_answer)
-            
-            # Ensure proper spacing around code blocks
-            cleaned_answer = re.sub(r'([^\n])\n```', r'\1\n\n```', cleaned_answer)
-            cleaned_answer = re.sub(r'```\n([^\n])', r'```\n\n\1', cleaned_answer)
-            
-            return cleaned_answer.strip()
-        
-        except Exception as e:
-            logger.warning(f"Formatting validation failed: {e}")
-            return answer  # Return original answer if validation fails

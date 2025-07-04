@@ -18,6 +18,8 @@ class EnhancedToolRegistry:
             "read_file": read_file_improved,
             "replace_text": replace_text_improved,
             "insert_at_line": insert_text_at_line,
+            "create_file": self._create_file,
+            "write_file": self._write_file,
             # Add more tools as needed
         }
         
@@ -89,6 +91,48 @@ class EnhancedToolRegistry:
                         "required": ["file_path", "line_number", "text"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_file",
+                    "description": "Create a new file with specified content",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Path where to create the new file"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write to the new file"
+                            }
+                        },
+                        "required": ["file_path", "content"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write content to a file (overwrites existing content)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Path to the file to write"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write to the file"
+                            }
+                        },
+                        "required": ["file_path", "content"]
+                    }
+                }
             }
         ]
     
@@ -122,7 +166,6 @@ class EnhancedToolRegistry:
                 if function_name in self.tools:
                     result = self.tools[function_name](**arguments)
                     
-
                     # Enhanced result logging
                     execution_record["success"] = result.get("success", True)
                     execution_record["result"] = result
@@ -183,6 +226,115 @@ class EnhancedToolRegistry:
         """Get recent failed tool executions for debugging"""
         failed = [log for log in self.execution_log if not log["success"]]
         return failed[-last_n:]
+    
+    def _create_file(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Create a new file with specified content"""
+        try:
+            from pathlib import Path
+            import os
+            
+            # Validate and resolve path
+            path = Path(file_path)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            
+            # Check if file already exists
+            if path.exists():
+                return {
+                    "success": False,
+                    "error": f"File already exists: {path}",
+                    "suggestion": "Use write_file to overwrite or choose a different path"
+                }
+            
+            # Check if parent directory exists
+            if not path.parent.exists():
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "error": f"Could not create parent directory: {str(e)}"
+                    }
+            
+            # Check write permissions
+            if not os.access(path.parent, os.W_OK):
+                return {
+                    "success": False,
+                    "error": f"No write permission in directory: {path.parent}"
+                }
+            
+            # Create and write file
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            return {
+                "success": True,
+                "message": f"Successfully created file: {path}",
+                "file_path": str(path),
+                "content_length": len(content),
+                "lines_written": len(content.split('\n'))
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error creating file {file_path}: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Failed to create file: {str(e)}",
+                "traceback": traceback.format_exc()
+            }
+    
+    def _write_file(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Write content to a file (overwrites existing content)"""
+        try:
+            from pathlib import Path
+            import os
+            
+            # Validate and resolve path
+            path = Path(file_path)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            
+            # Check if parent directory exists
+            if not path.parent.exists():
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "error": f"Could not create parent directory: {str(e)}"
+                    }
+            
+            # Check write permissions
+            if path.exists() and not os.access(path, os.W_OK):
+                return {
+                    "success": False,
+                    "error": f"No write permission for file: {path}"
+                }
+            elif not path.exists() and not os.access(path.parent, os.W_OK):
+                return {
+                    "success": False,
+                    "error": f"No write permission in directory: {path.parent}"
+                }
+            
+            # Write file
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            return {
+                "success": True,
+                "message": f"Successfully wrote to file: {path}",
+                "file_path": str(path),
+                "content_length": len(content),
+                "lines_written": len(content.split('\n'))
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error writing file {file_path}: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Failed to write file: {str(e)}",
+                "traceback": traceback.format_exc()
+            }
 
 # Create enhanced registry instance
 enhanced_tool_registry = EnhancedToolRegistry()
