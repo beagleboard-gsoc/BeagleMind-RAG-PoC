@@ -8,8 +8,9 @@ import re
 from .config import GROQ_API_KEY
 from .tools.enhanced_tool_registry_dynamic import enhanced_tool_registry as tool_registry
 # Setup logging - suppress verbose output
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.CRITICAL)  # Only show critical errors
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.CRITICAL)
 
 class QASystem:
     def __init__(self, retrieval_system, collection_name):
@@ -403,8 +404,8 @@ Answer:
                             return response_message.content or "I understand your question but couldn't generate a response."
                             
                     except Exception as tool_error:
-                        logger.warning(f"Tool calling failed: {tool_error}")
                         # Fall through to regular completion without tools
+                        pass
                 
                 # Regular completion without tools (fallback)
                 completion = client.chat.completions.create(
@@ -466,8 +467,6 @@ Answer:
                 # Method 1: OpenAI SDK with Ollama (RECOMMENDED by Ollama)
                 if tools and self._ollama_supports_tools(model_name):
                     try:
-                        logger.info(f"Using OpenAI SDK with Ollama endpoint - {len(tools)} tools available")
-                        
                         # Use OpenAI SDK exactly as shown in Ollama documentation
                         from openai import OpenAI
                         
@@ -491,30 +490,8 @@ Answer:
                         
                         # Check if the model wants to call any tools
                         if response_message.tool_calls:
-                            logger.info(f"Ollama (OpenAI SDK) calling {len(response_message.tool_calls)} tools:")
-                            for tc in response_message.tool_calls:
-                                logger.info(f"  - {tc.function.name}: {tc.function.arguments}")
-                            
                             # Execute the tool calls using our enhanced registry
                             tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
-                            
-                            # Log tool results for debugging
-                            for i, result in enumerate(tool_results):
-                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
-                                logger.info(f"Tool {i+1} result - Success: {success}")
-                                if not success and isinstance(result["result"], dict):
-                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
-                                else:
-                                    logger.info(f"Tool {i+1} executed successfully")
-                            
-                            # Check if any files were actually created for debugging
-                            for result in tool_results:
-                                if isinstance(result["result"], dict) and "file_path" in result["result"]:
-                                    file_path = result["result"]["file_path"]
-                                    if os.path.exists(file_path):
-                                        logger.info(f"✅ File confirmed created: {file_path}")
-                                    else:
-                                        logger.warning(f"❌ File not found after creation: {file_path}")
                             
                             # Prepare proper message history for second call (standard OpenAI format)
                             messages = [
@@ -570,16 +547,14 @@ Answer:
                             return response_message.content or "I understand your question but couldn't generate a response."
                             
                     except Exception as openai_error:
-                        logger.warning(f"OpenAI SDK with Ollama failed: {openai_error}")
                         # Fall through to native API as backup
+                        pass
                 
                 # Method 2: Fallback to native Ollama API (only if OpenAI SDK fails)
                 if tools and self._ollama_supports_tools(model_name):
                     try:
                         import requests
                         import json
-                        
-                        logger.info(f"Falling back to native Ollama API with {len(tools)} tools")
                         
                         ollama_native_url = "http://localhost:11434/api/chat"
                         
@@ -604,20 +579,9 @@ Answer:
                         
                         # Check if the model wants to call any tools
                         if "tool_calls" in response_message and response_message["tool_calls"]:
-                            logger.info(f"Ollama (native API) calling {len(response_message['tool_calls'])} tools:")
-                            for tc in response_message["tool_calls"]:
-                                logger.info(f"  - {tc['function']['name']}: {tc['function']['arguments']}")
-                            
                             # Convert tool calls to expected format and execute
                             tool_calls = self._convert_ollama_tool_calls(response_message["tool_calls"])
                             tool_results = tool_registry.parse_tool_calls(tool_calls)
-                            
-                            # Log tool results
-                            for i, result in enumerate(tool_results):
-                                success = result["result"].get("success", True) if isinstance(result["result"], dict) else True
-                                logger.info(f"Tool {i+1} result - Success: {success}")
-                                if not success and isinstance(result["result"], dict):
-                                    logger.warning(f"Tool error: {result['result'].get('error', 'Unknown error')}")
                             
                             # Prepare messages for second call with tool results
                             messages = [
@@ -670,12 +634,10 @@ Answer:
                             return response_message.get("content", "I understand your question but couldn't generate a response.")
                             
                     except Exception as native_error:
-                        logger.warning(f"Native Ollama API also failed: {native_error}")
                         # Fall through to regular completion without tools
+                        pass
                 
                 # Method 3: Regular completion without tools (final fallback)
-                logger.info("Falling back to regular completion without tools")
-                
                 # Try OpenAI SDK first for regular completion
                 try:
                     from openai import OpenAI
@@ -695,8 +657,6 @@ Answer:
                     return completion.choices[0].message.content or "No response generated"
                     
                 except Exception as sdk_error:
-                    logger.warning(f"OpenAI SDK regular completion failed: {sdk_error}")
-                    
                     # Final fallback to native API
                     import requests
                     
@@ -768,11 +728,6 @@ Answer:
         # Check if any of the supported model names are in the model string
         is_supported = any(supported in model_lower for supported in tool_supporting_models)
         
-        if is_supported:
-            logger.info(f"Model {model_name} supports tool calling")
-        else:
-            logger.warning(f"Model {model_name} may not support tool calling. Supported models: {', '.join(tool_supporting_models[:5])}...")
-        
         return is_supported
     
     def _convert_ollama_tool_calls(self, ollama_tool_calls):
@@ -810,9 +765,7 @@ Answer:
             try:
                 converted_call = ToolCall(tc)
                 converted_calls.append(converted_call)
-                logger.info(f"Converted tool call: {converted_call.function.name} with ID {converted_call.id}")
             except Exception as e:
-                logger.error(f"Failed to convert tool call {tc}: {e}")
                 continue
         
         return converted_calls

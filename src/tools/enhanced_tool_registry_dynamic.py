@@ -4,7 +4,10 @@ import logging
 from typing import Dict, Any, List
 from pathlib import Path
 
+# Suppress tool registry logging
+logging.getLogger(__name__).setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.CRITICAL)
 
 class EnhancedToolRegistry:
     def __init__(self):
@@ -44,13 +47,11 @@ class EnhancedToolRegistry:
             try:
                 # Check if the resolved path is within current directory or its subdirectories
                 path_obj.relative_to(current_dir)
-                logger.info(f"Path {resolved_path} is within current directory: {current_dir}")
             except ValueError:
                 # Path is outside current directory - allow if it's in tmp or user's home
                 allowed_roots = [Path("/tmp"), Path.home()]
                 if not any(str(path_obj).startswith(str(root)) for root in allowed_roots):
                     return False, f"Path {resolved_path} is outside allowed directories (current: {current_dir})"
-                logger.info(f"Path {resolved_path} is in allowed external directory")
             
             # For read operations, file must exist
             if operation == "read":
@@ -67,7 +68,6 @@ class EnhancedToolRegistry:
                 if not parent_dir.exists():
                     try:
                         parent_dir.mkdir(parents=True, exist_ok=True)
-                        logger.info(f"Created parent directory: {parent_dir}")
                     except Exception as e:
                         return False, f"Cannot create parent directory: {e}"
                 
@@ -78,7 +78,6 @@ class EnhancedToolRegistry:
                     if not os.access(str(parent_dir), os.W_OK):
                         return False, f"No write permission for directory: {parent_dir}"
             
-            logger.info(f"Path validated successfully: {resolved_path}")
             return True, resolved_path
             
         except Exception as e:
@@ -86,8 +85,6 @@ class EnhancedToolRegistry:
     
     def read_file(self, file_path: str) -> Dict[str, Any]:
         """Read content from a file"""
-        logger.info(f"Reading file: {file_path} (cwd: {os.getcwd()})")
-        
         valid, resolved_path_or_error = self._validate_path(file_path, "read")
         if not valid:
             return {
@@ -115,8 +112,6 @@ class EnhancedToolRegistry:
     
     def create_file(self, file_path: str, content: str) -> Dict[str, Any]:
         """Create a new file with specified content"""
-        logger.info(f"Creating file: {file_path} (cwd: {os.getcwd()})")
-        
         valid, resolved_path_or_error = self._validate_path(file_path, "create")
         if not valid:
             return {
@@ -137,7 +132,6 @@ class EnhancedToolRegistry:
             with open(resolved_path_or_error, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            logger.info(f"File created successfully: {resolved_path_or_error}")
             return {
                 "success": True,
                 "message": f"File created successfully",
@@ -153,8 +147,6 @@ class EnhancedToolRegistry:
     
     def write_file(self, file_path: str, content: str) -> Dict[str, Any]:
         """Write content to a file (overwrites existing)"""
-        logger.info(f"Writing file: {file_path} (cwd: {os.getcwd()})")
-        
         valid, resolved_path_or_error = self._validate_path(file_path, "write")
         if not valid:
             return {
@@ -167,7 +159,6 @@ class EnhancedToolRegistry:
             with open(resolved_path_or_error, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            logger.info(f"File written successfully: {resolved_path_or_error}")
             return {
                 "success": True,
                 "message": f"File written successfully",
@@ -183,8 +174,6 @@ class EnhancedToolRegistry:
     
     def replace_text(self, file_path: str, old_text: str, new_text: str) -> Dict[str, Any]:
         """Replace text in a file"""
-        logger.info(f"Replacing text in file: {file_path} (cwd: {os.getcwd()})")
-        
         # First read the file
         read_result = self.read_file(file_path)
         if not read_result["success"]:
@@ -223,8 +212,6 @@ class EnhancedToolRegistry:
     
     def insert_at_line(self, file_path: str, line_number: int, text: str) -> Dict[str, Any]:
         """Insert text at a specific line number"""
-        logger.info(f"Inserting text at line {line_number} in file: {file_path} (cwd: {os.getcwd()})")
-        
         # Check if file exists first - if not, suggest creating it
         valid_check, resolved_path_or_error = self._validate_path(file_path, "read")
         if not valid_check:
@@ -412,9 +399,6 @@ class EnhancedToolRegistry:
                 else:
                     arguments = tool_call.function.arguments
                 
-                logger.info(f"Executing tool: {function_name} with args: {arguments}")
-                logger.info(f"Current working directory: {os.getcwd()}")
-                
                 # Execute the tool
                 if function_name in self.tools:
                     result = self.tools[function_name](**arguments)
@@ -430,7 +414,6 @@ class EnhancedToolRegistry:
                 })
                 
             except Exception as e:
-                logger.error(f"Tool execution failed: {e}")
                 results.append({
                     "tool_call_id": tool_call.id,
                     "result": {

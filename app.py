@@ -1,14 +1,25 @@
-import logging
+#!/usr/bin/env python3
+"""
+Gradio App Launcher for RAG Chatbot
 
-class App:
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
-        self.handler = logging.FileHandler('app.log')
-        self.handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(self.handler)
+Run this script to launch the web interface for the RAG system.
+"""
 
-    def run(self):
-        self.logger.debug('App started')
-        # your app code here
-        self.logger.info('App finished')
+import sys
+import os
+
+# Add the src directory to Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+if __name__ == "__main__":
+    try:
+        from src.gradio_app import main
+        main()
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("Please make sure all dependencies are installed:")
+        print("pip install gradio")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error launching app: {e}")
+        sys.exit(1)

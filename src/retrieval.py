@@ -11,9 +11,10 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader
 import numpy as np
 from .config import MILVUS_HOST, MILVUS_PORT, MILVUS_USER, MILVUS_PASSWORD, MILVUS_TOKEN, MILVUS_URI
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging - minimize output
+logging.basicConfig(level=logging.CRITICAL)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.CRITICAL)
 
 
 class RetrievalSystem:
@@ -122,10 +123,8 @@ class RetrievalSystem:
         
         # Check if collection exists
         if utility.has_collection(collection_name):
-            print(f"Collection '{collection_name}' already exists")
             self.collection = Collection(collection_name)
         else:
-            print(f"Creating new collection '{collection_name}'")
             self.collection = Collection(collection_name, schema)
             
             # Create index for vector field
@@ -135,11 +134,9 @@ class RetrievalSystem:
                 "params": {"nlist": 1024}
             }
             self.collection.create_index("embedding", index_params)
-            print("Created vector index for collection")
         
         # Load collection into memory
         self.collection.load()
-        print("Collection loaded successfully")
         
     def load_documents(self, data_path):
         """Load documents from directory"""
