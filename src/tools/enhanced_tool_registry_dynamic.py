@@ -291,7 +291,7 @@ class EnhancedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "read_file",
-                    "description": "Read content from a file. Paths are resolved relative to current working directory.",
+                    "description": "Read content from a file. Paths are resolved relative to current working directory. Use this when user asks to read, show, or display file contents.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -308,7 +308,7 @@ class EnhancedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "create_file",
-                    "description": "Create a new file with specified content. Use this for creating new files. Paths are resolved relative to current working directory. File must not already exist.",
+                    "description": "Create a new file with specified content. ONLY use this for files that do not exist yet. If file exists, use write_file instead. Paths are resolved relative to current working directory.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -329,7 +329,7 @@ class EnhancedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "description": "Write content to a file, overwriting existing content. Use this to replace entire file contents. Paths are resolved relative to current working directory.",
+                    "description": "Write content to a file, overwriting existing content. Use this to replace entire file contents or when file already exists. This is the MOST COMMON file operation tool - use it whenever user wants to create or modify files. Paths are resolved relative to current working directory.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -350,7 +350,7 @@ class EnhancedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "replace_text",
-                    "description": "Replace specific text in an existing file. File must exist. Use this for targeted text replacements.",
+                    "description": "Replace specific text in an existing file. File must exist. Use this for targeted text replacements when you only want to change part of a file.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -375,7 +375,7 @@ class EnhancedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "insert_at_line",
-                    "description": "Insert text at a specific line number in an existing file. File must exist. Use this for adding lines to existing files. Prefer create_file with complete content for new files.",
+                    "description": "Insert text at a specific line number in an existing file. File must exist. Use this for adding lines to existing files. For new files or complete rewrites, prefer write_file.",
                     "parameters": {
                         "type": "object",
                         "properties": {
