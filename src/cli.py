@@ -46,6 +46,16 @@ OLLAMA_MODELS = [
 
 LLM_BACKENDS = ["groq", "ollama"]
 
+# ASCII Art Banner for BeagleMind
+BEAGLEMIND_BANNER = """
+██████╗ ███████╗ █████╗  ██████╗ ██╗     ███████╗███╗   ███╗██╗███╗   ██╗██████╗ 
+██╔══██╗██╔════╝██╔══██╗██╔════╝ ██║     ██╔════╝████╗ ████║██║████╗  ██║██╔══██╗
+██████╔╝█████╗  ███████║██║  ███╗██║     █████╗  ██╔████╔██║██║██╔██╗ ██║██║  ██║
+██╔══██╗██╔══╝  ██╔══██║██║   ██║██║     ██╔══╝  ██║╚██╔╝██║██║██║╚██╗██║██║  ██║
+██████╔╝███████╗██║  ██║╚██████╔╝███████╗███████╗██║ ╚═╝ ██║██║██║ ╚████║██████╔╝
+╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝ 
+"""
+
 class BeagleMindCLI:
     def __init__(self):
         self.retrieval_system = None
@@ -372,6 +382,10 @@ def cli():
               help='Force re-initialization even if already initialized')
 def init(collection, force):
     """Initialize BeagleMind system and load the collection"""
+    # Display the ASCII banner
+    console.print(f"[bold cyan]{BEAGLEMIND_BANNER}[/bold cyan]")
+    console.print("[bold]Intelligent Documentation Assistant for Beagleboard Projects[/bold]\n")
+    
     beaglemind = BeagleMindCLI()
     
     if beaglemind.config.get("initialized", False) and not force:
@@ -380,7 +394,7 @@ def init(collection, force):
         return
     
     if beaglemind.initialize_system(collection):
-        console.print(f"[green]🚀 BeagleMind is ready! You can now use 'beaglemind chat' to ask questions.[/green]")
+        console.print(f"\n[green]🚀 BeagleMind is ready! You can now use 'beaglemind chat' to ask questions.[/green]")
     else:
         sys.exit(1)
 
