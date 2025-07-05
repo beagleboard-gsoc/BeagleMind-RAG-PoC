@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
 from .config import GROQ_API_KEY
-from .tools.enhanced_tool_registry_dynamic import enhanced_tool_registry as tool_registry
+from .tools.enhanced_tool_registry_optimized import enhanced_tool_registry_optimized as tool_registry
 # Setup logging - suppress verbose output
 logging.basicConfig(level=logging.CRITICAL)  # Only show critical errors
 logger = logging.getLogger(__name__)
@@ -34,6 +34,10 @@ class QASystem:
             'comparison': [r'\bcompare\b', r'\bdifference\b', r'\bversus\b', r'\bvs\b', r'\bbetter\b'],
             'recent': [r'\blatest\b', r'\brecent\b', r'\bnew\b', r'\bupdated\b', r'\bcurrent\b']
         }
+    
+    def get_available_tools(self) -> List[Dict[str, Any]]:
+        """Return the OpenAI function definitions for all available tools"""
+        return tool_registry.get_all_tool_definitions()
     
     
     def rerank_documents(self, query: str, search_results: Dict[str, Any], top_k: int = 10) -> List[Dict[str, Any]]:
@@ -129,8 +133,30 @@ class QASystem:
             context_parts.append(context_part)
         
         context = "\n" + "="*50 + "\n".join(context_parts)
-        # Use a single unified system prompt with tool awareness
-        system_prompt = '''You are BeagleMind, an expert documentation assistant for the Beagleboard project.
+        
+        # Check if this is a file creation request
+        file_creation_keywords = ["create", "make", "generate", "write", "save", "file"]
+        is_file_request = any(keyword in question.lower() for keyword in file_creation_keywords)
+        
+        if is_file_request:
+            # Use a more direct prompt for file operations
+            system_prompt = '''You are BeagleMind, a file operation assistant. You have access to file tools and MUST use them when users request file operations.
+
+AVAILABLE TOOLS:
+- write_file(file_path, content): Create or overwrite a file with content
+
+CRITICAL: When a user asks to create, make, generate, or write a file, you MUST call the write_file function. Do not just provide code - actually create the file.
+
+EXAMPLE:
+User: "Create a Python file to blink an LED"
+Response: I'll create a Python file for LED blinking on BeagleY-AI.
+
+[THEN CALL: write_file("led_blink.py", "python_code_here")]
+
+The code content explains the implementation.'''
+        else:
+            # Use the full system prompt for other requests
+            system_prompt = '''You are BeagleMind, an expert documentation assistant for the Beagleboard project.
 
 Provide accurate, helpful answers using only the provided context documents.
 
@@ -452,9 +478,16 @@ Answer:
                         return f"I'm unable to process your request right now. Please try again later."
     
     def _get_ollama_response(self, prompt: str, model_name: str, temperature: float) -> str:
-        """Enhanced Ollama API response using OpenAI-compatible endpoint (recommended approach)"""
+        """Get response from Ollama API using OpenAI-compatible endpoint with enhanced tool calling support"""
+        from openai import OpenAI
         import time
-        import os
+        
+        # Initialize OpenAI client with Ollama base URL (same pattern as Groq)
+        client = OpenAI(
+            api_key="ollama",  # Ollama uses 'ollama' as the API key
+            base_url="http://localhost:11434/v1",
+            timeout=30.0  # 30 second timeout
+        )
         
         # Get available tools for function calling
         tools = tool_registry.get_all_tool_definitions()
@@ -464,220 +497,168 @@ Answer:
         
         for attempt in range(max_retries):
             try:
-                # Method 1: OpenAI SDK with Ollama (RECOMMENDED by Ollama)
-                if tools and self._ollama_supports_tools(model_name):
-                    try:
-                        # Use OpenAI SDK exactly as shown in Ollama documentation
-                        from openai import OpenAI
-                        
-                        # This follows the exact pattern from Ollama's official docs
-                        client = OpenAI(
-                            base_url="http://localhost:11434/v1",
-                            api_key="ollama",  # Ollama uses 'ollama' as the API key
-                            timeout=60.0
-                        )
-                        
-                        # First call with tools
-                        completion = client.chat.completions.create(
-                            model=model_name,
-                            messages=[{"role": "user", "content": prompt}],
-                            tools=tools,
-                            tool_choice="auto",
-                            temperature=temperature
-                        )
-                        
-                        response_message = completion.choices[0].message
-                        
-                        # Check if the model wants to call any tools
-                        if response_message.tool_calls:
-                            # Execute the tool calls using our enhanced registry
-                            tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
-                            
-                            # Prepare proper message history for second call (standard OpenAI format)
-                            messages = [
-                                {"role": "user", "content": prompt},
-                                {
-                                    "role": "assistant",
-                                    "content": response_message.content,
-                                    "tool_calls": [
-                                        {
-                                            "id": tc.id,
-                                            "type": tc.type,
-                                            "function": {
-                                                "name": tc.function.name,
-                                                "arguments": tc.function.arguments
-                                            }
-                                        } for tc in response_message.tool_calls
-                                    ]
-                                }
-                            ]
-                            
-                            # Add tool results as messages (standard OpenAI format)
-                            for tool_result in tool_results:
-                                tool_content = tool_result["result"]
-                                
-                                # Handle different result types properly
-                                if isinstance(tool_content, dict):
-                                    if tool_content.get("success", True):
-                                        content_str = tool_content.get("content", str(tool_content))
-                                    else:
-                                        content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
-                                elif isinstance(tool_content, str):
-                                    content_str = tool_content
-                                else:
-                                    content_str = str(tool_content)
-                                
-                                # Standard OpenAI tool message format
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_result["tool_call_id"],
-                                    "content": content_str
-                                })
-                            
-                            # Second call with tool results using OpenAI SDK
-                            final_completion = client.chat.completions.create(
-                                model=model_name,
-                                messages=messages,
-                                temperature=temperature
-                            )
-                            
-                            return final_completion.choices[0].message.content
-                        else:
-                            # No tool calls, return the original response
-                            return response_message.content or "I understand your question but couldn't generate a response."
-                            
-                    except Exception as openai_error:
-                        # Fall through to native API as backup
-                        pass
-                
-                # Method 2: Fallback to native Ollama API (only if OpenAI SDK fails)
-                if tools and self._ollama_supports_tools(model_name):
-                    try:
-                        import requests
-                        import json
-                        
-                        ollama_native_url = "http://localhost:11434/api/chat"
-                        
-                        # First call with tools using native API
-                        payload = {
-                            "model": model_name,
-                            "messages": [{"role": "user", "content": prompt}],
-                            "tools": tools,
-                            "stream": False,
-                            "options": {
-                                "temperature": temperature,
-                                "num_ctx": 4096,  # Increase context for tool calling
-                                "num_predict": 2048
-                            }
-                        }
-                        
-                        response = requests.post(ollama_native_url, json=payload, timeout=120)
-                        response.raise_for_status()
-                        
-                        result = response.json()
-                        response_message = result.get("message", {})
-                        
-                        # Check if the model wants to call any tools
-                        if "tool_calls" in response_message and response_message["tool_calls"]:
-                            # Convert tool calls to expected format and execute
-                            tool_calls = self._convert_ollama_tool_calls(response_message["tool_calls"])
-                            tool_results = tool_registry.parse_tool_calls(tool_calls)
-                            
-                            # Prepare messages for second call with tool results
-                            messages = [
-                                {"role": "user", "content": prompt},
-                                {
-                                    "role": "assistant", 
-                                    "content": response_message.get("content", ""),
-                                    "tool_calls": response_message["tool_calls"]
-                                }
-                            ]
-                            
-                            # Add tool results as messages (native format)
-                            for tool_result in tool_results:
-                                tool_content = tool_result["result"]
-                                
-                                if isinstance(tool_content, dict):
-                                    if tool_content.get("success", True):
-                                        content_str = tool_content.get("content", str(tool_content))
-                                    else:
-                                        content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
-                                elif isinstance(tool_content, str):
-                                    content_str = tool_content
-                                else:
-                                    content_str = str(tool_content)
-                                
-                                messages.append({
-                                    "role": "tool",
-                                    "content": content_str
-                                })
-                            
-                            # Second call with tool results
-                            final_payload = {
-                                "model": model_name,
-                                "messages": messages,
-                                "stream": False,
-                                "options": {
-                                    "temperature": temperature,
-                                    "num_ctx": 4096,
-                                    "num_predict": 2048
-                                }
-                            }
-                            
-                            final_response = requests.post(ollama_native_url, json=final_payload, timeout=120)
-                            final_response.raise_for_status()
-                            
-                            final_result = final_response.json()
-                            return final_result.get("message", {}).get("content", "I couldn't generate a response.")
-                        else:
-                            # No tool calls, return the original response
-                            return response_message.get("content", "I understand your question but couldn't generate a response.")
-                            
-                    except Exception as native_error:
-                        # Fall through to regular completion without tools
-                        pass
-                
-                # Method 3: Regular completion without tools (final fallback)
-                # Try OpenAI SDK first for regular completion
-                try:
-                    from openai import OpenAI
+                # Try function calling first if tools are available
+                if tools:
+                    # Try multiple tool calling approaches for Ollama compatibility
+                    tool_calling_config = {"tool_choice": "required"} # Force tool usage if supported
                     
-                    client = OpenAI(
-                        base_url="http://localhost:11434/v1",
-                        api_key="ollama",
-                        timeout=30.0
-                    )
+                    
+                    # Temporary debug logging
+                    print(f"🔧 Ollama: Trying tool config: {tool_calling_config}")
                     
                     completion = client.chat.completions.create(
                         model=model_name,
                         messages=[{"role": "user", "content": prompt}],
-                        temperature=temperature
+                        temperature=temperature,
+                        tools=tools,
+                        timeout=25.0,
+                        **tool_calling_config
                     )
                     
-                    return completion.choices[0].message.content or "No response generated"
+                    response_message = completion.choices[0].message
                     
-                except Exception as sdk_error:
-                    # Final fallback to native API
-                    import requests
+                    # Debug what we got back
+                    print(f"🔧 Ollama: Response content: {response_message.content[:200]}...")
+                    print(f"🔧 Ollama: Has tool_calls: {hasattr(response_message, 'tool_calls')}")
+                    if hasattr(response_message, 'tool_calls'):
+                        print(f"🔧 Ollama: Tool calls count: {len(response_message.tool_calls) if response_message.tool_calls else 0}")
+                        if response_message.tool_calls:
+                            print(f"🔧 Ollama: Tool calls: {[tc.function.name if hasattr(tc, 'function') else tc for tc in response_message.tool_calls]}")
                     
-                    ollama_native_url = "http://localhost:11434/api/chat"
-                    payload = {
-                        "model": model_name,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "stream": False,
-                        "options": {
-                            "temperature": temperature,
-                            "num_ctx": 4096,
-                            "num_predict": 2048
-                        }
-                    }
-                    
-                    response = requests.post(ollama_native_url, json=payload, timeout=120)
-                    response.raise_for_status()
-                    
-                    result = response.json()
-                    return result.get("message", {}).get("content", "No response generated")
+                    # Check if tool calls were made
+                    if hasattr(response_message, 'tool_calls') and response_message.tool_calls and len(response_message.tool_calls) > 0:
+                        print(f"✅ Ollama: Tool calls successful with config: {tool_calling_config}")
+                        # Tool calls successful! Execute them
+                        tool_results = tool_registry.parse_tool_calls(response_message.tool_calls)
+                        
+                        # Prepare message history for second call
+                        messages = [
+                            {"role": "user", "content": prompt},
+                            {
+                                "role": "assistant",
+                                "content": response_message.content,
+                                "tool_calls": [
+                                    {
+                                        "id": tc.id,
+                                        "type": tc.type,
+                                        "function": {
+                                            "name": tc.function.name,
+                                            "arguments": tc.function.arguments
+                                        }
+                                    } for tc in response_message.tool_calls
+                                ]
+                            }
+                        ]
+                        
+                        # Add tool results as messages
+                        for tool_result in tool_results:
+                            tool_content = tool_result["result"]
+                            
+                            if isinstance(tool_content, dict):
+                                if tool_content.get("success", True):
+                                    content_str = tool_content.get("content", str(tool_content))
+                                else:
+                                    content_str = f"Error: {tool_content.get('error', 'Unknown error')}"
+                            elif isinstance(tool_content, str):
+                                content_str = tool_content
+                            else:
+                                content_str = str(tool_content)
+                            
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_result["tool_call_id"],
+                                "content": content_str
+                            })
+                        
+                        # Second call with tool results
+                        final_completion = client.chat.completions.create(
+                            model=model_name,
+                            messages=messages,
+                            temperature=temperature,
+                            timeout=30.0
+                        )
+                        
+                        return final_completion.choices[0].message.content
+                    else:
+                        # No tool calls with this configuration, try next
+                        print(f"❌ Ollama: No tool calls with config: {tool_calling_config}")
+                        
+                        # Check if the response mentions file creation but didn't call tools
+                        if "write_file" in response_message.content or "create" in response_message.content.lower():
+                            print(f"💡 Ollama: Model seems to understand but not calling tools")
+                            print(f"💡 Ollama: Response mentions file operations: {response_message.content[:100]}...")
+                        
                 
+                    # If we get here, none of the tool calling attempts worked
+                    print("❌ Ollama: All tool calling attempts failed, falling back to regular completion")
+                    
+                    # For file creation requests, try one more approach - check if we can manually parse intent
+                    if any(keyword in prompt.lower() for keyword in ["create", "make", "generate", "write", "save"]) and "file" in prompt.lower():
+                        print("💡 Ollama: Detected file creation request, attempting manual tool execution")
+                        
+                        # Get the regular response first
+                        try:
+                            regular_completion = client.chat.completions.create(
+                                model=model_name,
+                                messages=[{"role": "user", "content": prompt}],
+                                temperature=temperature,
+                                timeout=25.0
+                            )
+                            
+                            regular_response = regular_completion.choices[0].message.content
+                            
+                            # Try to extract filename and code from the response
+                            import re
+                            
+                            # Look for python code blocks
+                            code_pattern = r'```python\s*(.*?)\s*```'
+                            code_matches = re.findall(code_pattern, regular_response, re.DOTALL)
+                            
+                            # Look for filename mentions
+                            filename_patterns = [
+                                r'["\']([^"\']*\.py)["\']',  # "filename.py"
+                                r'(\w+\.py)',  # filename.py
+                                r'create.*?([a-zA-Z_][a-zA-Z0-9_]*\.py)',  # create filename.py
+                            ]
+                            
+                            filename = None
+                            for pattern in filename_patterns:
+                                matches = re.findall(pattern, regular_response, re.IGNORECASE)
+                                if matches:
+                                    filename = matches[0]
+                                    break
+                            
+                            # If we found both code and filename, create the file
+                            if code_matches and filename:
+                                code_content = code_matches[0].strip()
+                                print(f"💡 Ollama: Auto-extracting filename: {filename}")
+                                print(f"💡 Ollama: Auto-extracting code: {len(code_content)} chars")
+                                
+                                # Use our tool to create the file
+                                result = tool_registry.write_file(filename, code_content)
+                                
+                                if result.get("success"):
+                                    return f"{regular_response}\n\n✅ **File created successfully:** `{filename}`\n\nThe file has been created with the LED blinking code for BeagleY-AI."
+                                else:
+                                    return f"{regular_response}\n\n❌ **File creation failed:** {result.get('error', 'Unknown error')}"
+                            
+                            # If we couldn't extract properly, just return the regular response
+                            return regular_response
+                            
+                        except Exception as e:
+                            print(f"💡 Ollama: Manual tool execution failed: {e}")
+                    
+                    # Fall through to regular completion
+                
+                # Regular completion without tools (fallback)
+                completion = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    timeout=25.0
+                )
+                return completion.choices[0].message.content or "I couldn't generate a response to your question."
+                    
             except Exception as e:
                 if attempt < max_retries - 1:
                     # Exponential backoff
@@ -688,89 +669,27 @@ Answer:
                     # Final attempt failed, analyze error type and return appropriate message
                     error_msg = str(e).lower()
                     
+                    error_type = type(e).__name__.lower()
+                    
                     # Check for connection/network errors
-                    if ("connection" in error_msg or "timeout" in error_msg or 
-                        "network" in error_msg or "refused" in error_msg):
+                    if (error_type in ["connectionerror", "timeouterror", "httperror"] or 
+                        "connection" in error_msg or "timeout" in error_msg or 
+                        "network" in error_msg or "dns" in error_msg or 
+                        "unreachable" in error_msg or "refused" in error_msg):
                         return "I'm having connectivity issues with Ollama. Please ensure Ollama is running and try again."
                     
                     # Check for model not found
                     elif "not found" in error_msg or "404" in error_msg:
                         return f"Model '{model_name}' not found in Ollama. Please check if the model is installed."
                     
-                    # Check for service unavailable
-                    elif "503" in error_msg or "502" in error_msg or "500" in error_msg:
+                    # Check for service unavailable errors
+                    elif "503" in error_msg or "502" in error_msg or "500" in error_msg or "service unavailable" in error_msg:
                         return "Ollama service is temporarily unavailable. Please try again later."
                     
-                    # Generic error
+                    # Generic error for unknown issues
                     else:
                         return f"I'm unable to process your request with Ollama right now. Please try again later."
     
-    def _ollama_supports_tools(self, model_name: str) -> bool:
-        """Check if the Ollama model supports tool calling"""
-        # Updated based on official Ollama tool support documentation
-        # https://ollama.com/blog/tool-support
-        tool_supporting_models = [
-            # Core supported models from Ollama documentation
-            "llama3.1", "llama3.2", "llama3.3",
-            "mistral", "mistral-nemo", 
-            "firefunction-v2",
-            "command-r", "command-r-plus",
-            
-            # Additional models with tool support
-            "mixtral", "codellama", "deepseek-coder", 
-            "qwen", "qwen2", "qwen2.5", "qwen-coder",
-            "phi3", "phi3.5", "gemma2", "granite",
-            "hermes", "solar", "wizard", "openchat"
-        ]
-        
-        model_lower = model_name.lower()
-        
-        # Check if any of the supported model names are in the model string
-        is_supported = any(supported in model_lower for supported in tool_supporting_models)
-        
-        return is_supported
-    
-    def _convert_ollama_tool_calls(self, ollama_tool_calls):
-        """Convert Ollama tool call format to expected format with better ID handling"""
-        class ToolCall:
-            def __init__(self, tool_call_data):
-                # Generate a consistent ID based on function name and arguments
-                func_name = tool_call_data.get("function", {}).get("name", "unknown")
-                func_args = tool_call_data.get("function", {}).get("arguments", "{}")
-                
-                # Use provided ID or generate one
-                if "id" in tool_call_data:
-                    self.id = tool_call_data["id"]
-                else:
-                    # Generate a deterministic ID
-                    import hashlib
-                    id_source = f"{func_name}_{func_args}"
-                    self.id = f"call_{hashlib.md5(id_source.encode()).hexdigest()[:8]}"
-                
-                self.type = "function"
-                self.function = ToolCallFunction(tool_call_data["function"])
-        
-        class ToolCallFunction:
-            def __init__(self, function_data):
-                self.name = function_data["name"]
-                self.arguments = function_data.get("arguments", "{}")
-                
-                # Ensure arguments is a string
-                if isinstance(self.arguments, dict):
-                    import json
-                    self.arguments = json.dumps(self.arguments)
-        
-        converted_calls = []
-        for tc in ollama_tool_calls:
-            try:
-                converted_call = ToolCall(tc)
-                converted_calls.append(converted_call)
-            except Exception as e:
-                continue
-        
-        return converted_calls
-    
-
     def _refactor_code_formatting(self, answer: str, llm_backend: str, model_name: str) -> str:
         """Post-process the answer to ensure proper code snippet formatting using the chosen LLM backend"""
         # Skip refactoring if the answer indicates connection issues
@@ -811,23 +730,18 @@ Refactored text with proper code formatting:
                 refactored_answer = completion.choices[0].message.content
                 
             elif llm_backend.lower() == "ollama":
-                import requests
-                import json
-                
-                ollama_url = "http://localhost:11434/api/generate"
-                payload = {
-                    "model": model_name,
-                    "prompt": refactor_prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.1
-                    }
-                }
-                
-                response = requests.post(ollama_url, json=payload, timeout=15)  # Shorter timeout
-                response.raise_for_status()
-                result = response.json()
-                refactored_answer = result.get("response", answer)
+                from openai import OpenAI
+                client = OpenAI(
+                    api_key="ollama",
+                    base_url="http://localhost:11434/v1",
+                    timeout=10.0  # Shorter timeout for refactoring
+                )
+                completion = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": refactor_prompt}],
+                    temperature=0.1
+                )
+                refactored_answer = completion.choices[0].message.content
             
             else:
                 return answer
@@ -837,4 +751,4 @@ Refactored text with proper code formatting:
         except Exception as e:
             # Silently return original answer if refactoring fails
             return answer
-    
+

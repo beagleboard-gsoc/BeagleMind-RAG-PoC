@@ -9,6 +9,7 @@ try:
     from .edit_file import edit_file_tool
     from .code_generator import code_generator_tool
     from .tool_registry import ToolRegistry, tool_registry
+    from .enhanced_tool_registry_optimized import enhanced_tool_registry_optimized
 except ImportError as e:
     # Handle import errors gracefully
     print(f"Warning: Could not import some tools: {e}")
@@ -20,5 +21,6 @@ __all__ = [
     'edit_file_tool',
     'code_generator_tool',
     'ToolRegistry',
-    'tool_registry'
+    'tool_registry',
+    'enhanced_tool_registry_optimized'
 ]
