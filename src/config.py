@@ -15,7 +15,7 @@ MILVUS_URI = os.getenv("MILVUS_URI")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL_NAME = "mixtral-8x7b-32768"  # or "llama2-70b-4096"
 
-# OpenAI (keeping for embeddings if needed)
+# OpenAI API configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # OpenRouter API configuration

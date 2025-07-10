@@ -70,7 +70,7 @@ class OptimizedToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "edit_file_lines",
-                    "description": "Edit specific lines in a file by line numbers",
+                    "description": "Edit specific lines of a file by line number",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -79,30 +79,21 @@ class OptimizedToolRegistry:
                                 "description": "Path to the file to edit"
                             },
                             "edits": {
-                                "type": "array",
-                                "description": "Array of edit operations",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "line_number": {
-                                            "type": "integer",
-                                            "description": "Line number to edit (1-based)"
-                                        },
-                                        "new_content": {
-                                            "type": "string",
-                                            "description": "New content for the line"
-                                        },
-                                        "operation": {
-                                            "type": "string",
-                                            "enum": ["replace", "insert_before", "insert_after", "delete"],
-                                            "description": "Type of edit operation"
-                                        }
-                                    },
-                                    "required": ["line_number", "operation"]
+                                "type": "object",
+                                "description": "Dictionary mapping line numbers (as strings) to new content. Empty string deletes the line.",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            },
+                            "lines": {
+                                "type": "object",
+                                "description": "Alternative key for edits parameter",
+                                "additionalProperties": {
+                                    "type": "string"
                                 }
                             }
                         },
-                        "required": ["file_path", "edits"]
+                        "required": ["file_path"]
                     }
                 }
             },
@@ -194,28 +185,28 @@ class OptimizedToolRegistry:
             {
                 "type": "function",
                 "function": {
-                    "name": "list_directory",
-                    "description": "List contents of a directory with optional filtering",
+                    "name": "show_directory_tree",
+                    "description": "Show directory structure using tree command",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "directory": {
                                 "type": "string",
-                                "description": "Directory path to list"
+                                "description": "Directory path to show tree structure for"
+                            },
+                            "max_depth": {
+                                "type": "integer",
+                                "description": "Maximum depth to show (default: 3)",
+                                "default": 3
                             },
                             "show_hidden": {
                                 "type": "boolean",
                                 "description": "Whether to show hidden files",
                                 "default": False
                             },
-                            "file_extensions": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Filter by file extensions"
-                            },
-                            "recursive": {
-                                "type": "boolean", 
-                                "description": "Whether to list recursively",
+                            "files_only": {
+                                "type": "boolean",
+                                "description": "Show only files, not directories",
                                 "default": False
                             }
                         },
@@ -229,6 +220,10 @@ class OptimizedToolRegistry:
         """Convert string path to safe Path object, handle relative paths"""
         path_obj = Path(path)
         if not path_obj.is_absolute():
+            # Check if file exists in current working directory first
+            if Path(path).exists():
+                return Path(path).resolve()
+            # Otherwise, use base directory
             path_obj = self.base_directory / path_obj
         return path_obj.resolve()
     
@@ -289,72 +284,66 @@ class OptimizedToolRegistry:
         except Exception as e:
             return {"success": False, "error": f"Error writing file: {str(e)}"}
     
-    def edit_file_lines(self, file_path: str, edits: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Edit specific lines in a file"""
+    def edit_file_lines(self, file_path=None, edits=None, **kwargs) -> Dict[str, Any]:
+        """Edit specific lines of a file. Accepts (file_path, edits), a single dict, or kwargs.
+        - If new_content is '', delete the line.
+        - If new_content contains newlines, replace the line with multiple lines.
+        - If new_content is whitespace or a single line, replace as is (preserving whitespace/newlines).
+        Accepts both 'edits' and 'lines' as the key for the edits dictionary.
+        """
+        # Try to extract file_path and edits/lines from various argument formats
+        # 1. If called with a single dict as the first argument
+        if file_path is not None and edits is None and isinstance(file_path, dict):
+            args = file_path
+            file_path = args.get('file_path')
+            edits = args.get('edits') or args.get('lines')
+        # 2. If called with kwargs only
+        if (file_path is None or edits is None):
+            file_path = kwargs.get('file_path', file_path)
+            edits = kwargs.get('edits') or kwargs.get('lines') or edits
+        # 3. If edits is a string (e.g., from JSON), parse it
+        if isinstance(edits, str):
+            try:
+                edits = json.loads(edits)
+            except Exception:
+                return {"error": "'edits' must be a dict or a JSON string representing a dict of line edits."}
+        # 4. Validate
+        if not file_path or not isinstance(edits, dict):
+            return {"error": "edit_file_lines requires 'file_path' (str) and 'edits' (dict) or 'lines' (dict) arguments."}
         try:
-            safe_path = self._safe_path(file_path)
-            
-            if not safe_path.exists():
-                return {"success": False, "error": f"File not found: {file_path}"}
-            
-            # Read current content
-            with open(safe_path, 'r', encoding='utf-8', errors='replace') as f:
+            expanded_path = os.path.expanduser(file_path)
+            if not os.path.exists(expanded_path):
+                return {"error": f"File not found: {file_path}"}
+            with open(expanded_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-            
-            # Sort edits by line number in reverse order to avoid line number shifts
-            sorted_edits = sorted(edits, key=lambda x: x['line_number'], reverse=True)
-            
-            changes_made = []
-            
-            for edit in sorted_edits:
-                line_num = edit['line_number'] - 1  # Convert to 0-based
-                operation = edit['operation']
-                new_content = edit.get('new_content', '')
-                
-                if operation == "replace":
-                    if 0 <= line_num < len(lines):
-                        old_content = lines[line_num].rstrip('\n')
-                        lines[line_num] = new_content + '\n'
-                        changes_made.append(f"Line {edit['line_number']}: Replaced '{old_content}' with '{new_content}'")
+            # Sort line numbers descending so edits don't affect subsequent indices
+            edit_items = sorted(edits.items(), key=lambda x: int(x[0]), reverse=True)
+            for line_num_str, new_content in edit_items:
+                idx = int(line_num_str) - 1
+                if 0 <= idx < len(lines):
+                    if new_content == '':
+                        # Delete the line
+                        del lines[idx]
+                    elif '\n' in new_content:
+                        # Replace with multiple lines (split, preserve newlines)
+                        new_lines = [l if l.endswith('\n') else l+'\n' for l in new_content.splitlines()]
+                        lines[idx:idx+1] = new_lines
                     else:
-                        changes_made.append(f"Line {edit['line_number']}: Invalid line number")
-                
-                elif operation == "insert_before":
-                    if 0 <= line_num <= len(lines):
-                        lines.insert(line_num, new_content + '\n')
-                        changes_made.append(f"Line {edit['line_number']}: Inserted '{new_content}' before")
-                    else:
-                        changes_made.append(f"Line {edit['line_number']}: Invalid line number")
-                
-                elif operation == "insert_after":
-                    if 0 <= line_num < len(lines):
-                        lines.insert(line_num + 1, new_content + '\n')
-                        changes_made.append(f"Line {edit['line_number']}: Inserted '{new_content}' after")
-                    elif line_num == len(lines):
-                        lines.append(new_content + '\n')
-                        changes_made.append(f"Line {edit['line_number']}: Appended '{new_content}'")
-                    else:
-                        changes_made.append(f"Line {edit['line_number']}: Invalid line number")
-                
-                elif operation == "delete":
-                    if 0 <= line_num < len(lines):
-                        deleted_content = lines.pop(line_num).rstrip('\n')
-                        changes_made.append(f"Line {edit['line_number']}: Deleted '{deleted_content}'")
-                    else:
-                        changes_made.append(f"Line {edit['line_number']}: Invalid line number")
-            
-            # Write back to file
-            with open(safe_path, 'w', encoding='utf-8') as f:
+                        # Replace as is, preserve newline if original had it
+                        if lines[idx].endswith('\n') and not new_content.endswith('\n'):
+                            new_content += '\n'
+                        lines[idx] = new_content
+            with open(expanded_path, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
-            
             return {
                 "success": True,
-                "message": f"File edited successfully: {file_path}",
-                "changes": changes_made,
+                "file_path": expanded_path,
+                "lines_edited": list(edits.keys()),
                 "total_lines": len(lines)
             }
         except Exception as e:
-            return {"success": False, "error": f"Error editing file: {str(e)}"}
+            logger.error(f"edit_file_lines error: {e}")
+            return {"error": f"Failed to edit file lines: {str(e)}"}
     
     def search_in_files(self, directory: str, pattern: str, file_extensions: Optional[List[str]] = None, is_regex: bool = False) -> Dict[str, Any]:
         """Search for text patterns in files"""
@@ -517,6 +506,134 @@ class OptimizedToolRegistry:
         except Exception as e:
             return {"success": False, "error": f"Error analyzing code: {str(e)}"}
     
+    def show_directory_tree(self, directory: str, max_depth: int = 3, show_hidden: bool = False, files_only: bool = False) -> Dict[str, Any]:
+        """Show directory structure using tree command"""
+        try:
+            safe_dir = self._safe_path(directory)
+            
+            if not safe_dir.exists():
+                return {"success": False, "error": f"Directory not found: {directory}"}
+            
+            if not safe_dir.is_dir():
+                return {"success": False, "error": f"Path is not a directory: {directory}"}
+            
+            # Build tree command
+            cmd_parts = ["tree"]
+            
+            # Add depth limit
+            cmd_parts.extend(["-L", str(max_depth)])
+            
+            # Add options
+            if show_hidden:
+                cmd_parts.append("-a")
+            
+            if files_only:
+                cmd_parts.append("-f")
+            
+            # Add directory path
+            cmd_parts.append(str(safe_dir))
+            
+            # Execute tree command
+            result = subprocess.run(
+                cmd_parts,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                # Fallback to simple directory listing if tree is not available
+                return self._fallback_directory_tree(safe_dir, max_depth, show_hidden)
+            
+            # Count directories and files from tree output
+            output_lines = result.stdout.strip().split('\n')
+            summary_line = output_lines[-1] if output_lines else ""
+            
+            # Extract counts from tree summary (e.g., "2 directories, 5 files")
+            directories = 0
+            files = 0
+            if "directories" in summary_line and "files" in summary_line:
+                import re
+                dir_match = re.search(r'(\d+)\s+directories', summary_line)
+                file_match = re.search(r'(\d+)\s+files', summary_line)
+                if dir_match:
+                    directories = int(dir_match.group(1))
+                if file_match:
+                    files = int(file_match.group(1))
+            
+            return {
+                "success": True,
+                "directory": str(safe_dir),
+                "tree_output": result.stdout,
+                "max_depth": max_depth,
+                "show_hidden": show_hidden,
+                "files_only": files_only,
+                "summary": {
+                    "directories": directories,
+                    "files": files,
+                    "total_items": directories + files
+                }
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": "Tree command timed out"}
+        except Exception as e:
+            return {"success": False, "error": f"Error showing directory tree: {str(e)}"}
+    
+    def _fallback_directory_tree(self, directory: Path, max_depth: int, show_hidden: bool) -> Dict[str, Any]:
+        """Fallback directory tree implementation when tree command is not available"""
+        try:
+            tree_lines = []
+            
+            def build_tree(path: Path, prefix: str = "", depth: int = 0):
+                if depth >= max_depth:
+                    return
+                
+                items = sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
+                
+                for i, item in enumerate(items):
+                    if not show_hidden and item.name.startswith('.'):
+                        continue
+                    
+                    is_last = i == len(items) - 1
+                    current_prefix = "└── " if is_last else "├── "
+                    tree_lines.append(f"{prefix}{current_prefix}{item.name}")
+                    
+                    if item.is_dir() and depth < max_depth - 1:
+                        next_prefix = prefix + ("    " if is_last else "│   ")
+                        build_tree(item, next_prefix, depth + 1)
+            
+            tree_lines.insert(0, str(directory))
+            build_tree(directory)
+            
+            # Count items
+            all_items = list(directory.rglob('*'))
+            if not show_hidden:
+                all_items = [item for item in all_items if not any(part.startswith('.') for part in item.parts)]
+            
+            directories = len([item for item in all_items if item.is_dir()])
+            files = len([item for item in all_items if item.is_file()])
+            
+            tree_output = '\n'.join(tree_lines)
+            tree_output += f"\n\n{directories} directories, {files} files"
+            
+            return {
+                "success": True,
+                "directory": str(directory),
+                "tree_output": tree_output,
+                "max_depth": max_depth,
+                "show_hidden": show_hidden,
+                "fallback_used": True,
+                "summary": {
+                    "directories": directories,
+                    "files": files,
+                    "total_items": directories + files
+                }
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": f"Error in fallback tree: {str(e)}"}
+
     def list_directory(self, directory: str, show_hidden: bool = False, file_extensions: Optional[List[str]] = None, recursive: bool = False) -> Dict[str, Any]:
         """List directory contents with filtering"""
         try:
@@ -754,6 +871,9 @@ class OptimizedToolRegistry:
                 })
         
         return results
+
+# Create a global instance
+enhanced_tool_registry_optimized = OptimizedToolRegistry()
 
 # Create global instance
 enhanced_tool_registry_optimized = OptimizedToolRegistry()

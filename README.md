@@ -174,6 +174,14 @@ Set your Groq API key:
 export GROQ_API_KEY="your-api-key-here"
 ```
 
+### For OpenAI (Cloud)
+
+Set your OpenAI API key:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
 ### For Ollama (Local)
 
 1. Install Ollama: https://ollama.ai
@@ -208,6 +216,14 @@ MILVUS_URI=your-uri
 - meta-llama/llama-4-scout-17b-16e-instruct
 - meta-llama/llama-4-maverick-17b-128e-instruct
 
+### OpenAI (Cloud)
+- gpt-4o
+- gpt-4o-mini
+- gpt-4-turbo
+- gpt-3.5-turbo
+- o1-preview
+- o1-mini
+
 ### Ollama (Local)
 - qwen3:1.7b
 
@@ -238,6 +254,9 @@ Run `beaglemind init` first.
 ### "No API Key" for Groq
 Set the GROQ_API_KEY environment variable.
 
+### "No API Key" for OpenAI  
+Set the OPENAI_API_KEY environment variable.
+
 ### "Service Down" for Ollama  
 Ensure Ollama is running: `ollama serve`
 
@@ -266,6 +285,11 @@ Edit the model lists in `src/cli.py`:
 ```python
 GROQ_MODELS = [
     "new-model-name",
+    # ... existing models
+]
+
+OPENAI_MODELS = [
+    "new-openai-model",
     # ... existing models
 ]
 

@@ -19,11 +19,20 @@ GROQ_MODELS = [
     "meta-llama/llama-4-maverick-17b-128e-instruct"
 ]
 
+OPENAI_MODELS = [
+    "gpt-4o",
+    "gpt-4o-mini", 
+    "gpt-4-turbo",
+    "gpt-3.5-turbo",
+    "o1-preview",
+    "o1-mini"
+]
+
 OLLAMA_MODELS = [
     "qwen3:1.7b",
 ]
 
-LLM_BACKENDS = ["groq", "ollama"]
+LLM_BACKENDS = ["groq", "openai", "ollama"]
 # beaglemind_w_chonkie to get old collection
 class GradioRAGApp:
     def __init__(self, collection_name: str = "beaglemind_docs"):
@@ -327,6 +336,8 @@ class GradioRAGApp:
         """Get available models for the selected backend"""
         if backend.lower() == "groq":
             return GROQ_MODELS
+        elif backend.lower() == "openai":
+            return OPENAI_MODELS
         elif backend.lower() == "ollama":
             return OLLAMA_MODELS
         else:
@@ -439,6 +450,8 @@ Generate a complete shell script:
             # Get code from LLM
             if llm_backend.lower() == "groq":
                 generated_code = self._get_groq_response(code_prompt, model_name, temperature)
+            elif llm_backend.lower() == "openai":
+                generated_code = self._get_openai_response(code_prompt, model_name, temperature)
             elif llm_backend.lower() == "ollama":
                 generated_code = self._get_ollama_response(code_prompt, model_name, temperature)
             else:
@@ -506,6 +519,24 @@ Generate a complete shell script:
             logger.error(f"Ollama API call failed: {e}")
             raise
     
+    def _get_openai_response(self, prompt: str, model_name: str, temperature: float) -> str:
+        """Get response from OpenAI API"""
+        try:
+            from openai import OpenAI
+            from .config import OPENAI_API_KEY
+            
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                timeout=30.0
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            raise
+    
     def _generate_intelligent_filename(self, query: str, file_type: str, llm_backend: str, model_name: str, temperature: float) -> str:
         """Generate an intelligent filename using LLM based on the query content"""
         try:
@@ -542,6 +573,8 @@ Generate filename (base name only):
             # Get filename suggestion from LLM
             if llm_backend.lower() == "groq":
                 suggested_name = self._get_groq_response(filename_prompt, model_name, 0.3)  # Lower temperature for more consistent naming
+            elif llm_backend.lower() == "openai":
+                suggested_name = self._get_openai_response(filename_prompt, model_name, 0.3)
             elif llm_backend.lower() == "ollama":
                 suggested_name = self._get_ollama_response(filename_prompt, model_name, 0.3)
             else:

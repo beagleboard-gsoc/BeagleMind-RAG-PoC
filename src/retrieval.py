@@ -53,7 +53,7 @@ class RetrievalSystem:
             connect_kwargs['password'] = MILVUS_PASSWORD
         if MILVUS_TOKEN:
             connect_kwargs['token'] = MILVUS_TOKEN
-        connections.connect(**connect_kwargs)
+        connections.connect(**connect_kwargs, collection_name=collection_name)
         
         
     def create_collection(self, collection_name="beaglemind_beagleY_ai"):
