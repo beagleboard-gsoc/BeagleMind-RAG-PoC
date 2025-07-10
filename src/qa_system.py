@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
 from .config import GROQ_API_KEY
-from .tools.enhanced_tool_registry_optimized import enhanced_tool_registry_optimized as tool_registry
+from .tools_registry import enhanced_tool_registry_optimized as tool_registry
 # Setup logging - suppress verbose output
 logging.basicConfig(level=logging.CRITICAL)  # Only show critical errors
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger.setLevel(logging.CRITICAL)
 class QASystem:
     def __init__(self, retrieval_system, collection_name):
         self.retrieval_system = retrieval_system
-        self.collection_name = collection_name
+        self.collectionx_name = collection_name
         
         # Initialize rerank model
         try:
