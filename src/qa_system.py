@@ -15,7 +15,7 @@ logger.setLevel(logging.CRITICAL)
 class QASystem:
     def __init__(self, retrieval_system, collection_name):
         self.retrieval_system = retrieval_system
-        self.collectionx_name = collection_name
+        self.collection_name = collection_name
         
         # Initialize rerank model
         try:
@@ -100,8 +100,23 @@ class QASystem:
             
             context = "\n" + "="*50 + "\n".join(context_parts) if context_parts else ""
             
+            # Get machine info for context
+            machine_info = tool_registry.get_machine_info()
+            
             # Create enhanced system prompt with context
             system_prompt = f"""You are BeagleMind, an expert documentation assistant for the Beagleboard project with advanced tool capabilities.
+
+**MACHINE CONTEXT:**
+- Hostname: {machine_info['machine_info'].get('hostname', 'unknown')}
+- OS: {machine_info['machine_info'].get('os', 'unknown')} {machine_info['machine_info'].get('os_release', '')}
+- User: {machine_info['machine_info'].get('user', 'unknown')}
+- Current Directory: {machine_info['current_working_directory']}
+- Base Directory: {machine_info['base_directory']}
+
+**IMPORTANT PATH BEHAVIOR:**
+- When no absolute path is specified, files will be created/edited in: {machine_info['current_working_directory']}
+- Use relative paths for files in the current working directory
+- Always confirm the full path when creating/editing files
 
 You have access to powerful tools that allow you to:
 - read_file: Read contents of files

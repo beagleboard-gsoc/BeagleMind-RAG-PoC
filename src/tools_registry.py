@@ -7,6 +7,8 @@ import subprocess
 import re
 import ast
 import tempfile
+import socket
+import platform
 from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
 import logging
@@ -19,6 +21,40 @@ class OptimizedToolRegistry:
     def __init__(self, base_directory: str = "/home/fayez/gsoc/rag_poc"):
         self.base_directory = Path(base_directory)
         self.base_directory.mkdir(exist_ok=True)
+        
+        # Machine identification
+        self.machine_info = self._get_machine_info()
+        
+        # Current working directory (where beaglemind command is run from)
+        self.current_working_directory = Path.cwd()
+        
+        logger.info(f"Tool registry initialized on {self.machine_info['hostname']} (OS: {self.machine_info['os']})")
+        logger.info(f"Current working directory: {self.current_working_directory}")
+        logger.info(f"Base directory: {self.base_directory}")
+    
+    def _get_machine_info(self) -> Dict[str, Any]:
+        """Get information about the current machine"""
+        try:
+            return {
+                "hostname": socket.gethostname(),
+                "fqdn": socket.getfqdn(),
+                "os": platform.system(),
+                "os_release": platform.release(),
+                "architecture": platform.machine(),
+                "processor": platform.processor(),
+                "python_version": platform.python_version(),
+                "user": os.getenv('USER', os.getenv('USERNAME', 'unknown')),
+                "home": str(Path.home()),
+                "cwd": str(Path.cwd())
+            }
+        except Exception as e:
+            logger.warning(f"Could not get full machine info: {e}")
+            return {
+                "hostname": "unknown",
+                "os": platform.system(),
+                "user": os.getenv('USER', 'unknown'),
+                "cwd": str(Path.cwd())
+            }
     
     def get_all_tool_definitions(self) -> List[Dict[str, Any]]:
         """Return OpenAI function definitions for all tools"""
@@ -131,6 +167,18 @@ class OptimizedToolRegistry:
             {
                 "type": "function",
                 "function": {
+                    "name": "get_machine_info",
+                    "description": "Get information about the current machine including hostname, OS, user, and working directory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "run_command",
                     "description": "Execute a shell command and return the output",
                     "parameters": {
@@ -221,10 +269,15 @@ class OptimizedToolRegistry:
         path_obj = Path(path)
         if not path_obj.is_absolute():
             # Check if file exists in current working directory first
-            if Path(path).exists():
-                return Path(path).resolve()
-            # Otherwise, use base directory
-            path_obj = self.base_directory / path_obj
+            cwd_path = self.current_working_directory / path_obj
+            if cwd_path.exists():
+                return cwd_path.resolve()
+            # Otherwise, check base directory
+            base_path = self.base_directory / path_obj
+            if base_path.exists():
+                return base_path.resolve()
+            # If neither exists, default to current working directory for new files
+            return cwd_path.resolve()
         return path_obj.resolve()
     
     def read_file(self, file_path: str) -> Dict[str, Any]:
@@ -345,6 +398,22 @@ class OptimizedToolRegistry:
             logger.error(f"edit_file_lines error: {e}")
             return {"error": f"Failed to edit file lines: {str(e)}"}
     
+    def get_machine_info(self) -> Dict[str, Any]:
+        """Return machine information for the current system"""
+        return {
+            "success": True,
+            "machine_info": self.machine_info,
+            "current_working_directory": str(self.current_working_directory),
+            "base_directory": str(self.base_directory),
+            "environment": {
+                "PATH": os.getenv('PATH', ''),
+                "HOME": os.getenv('HOME', ''),
+                "USER": os.getenv('USER', ''),
+                "SHELL": os.getenv('SHELL', ''),
+                "PWD": os.getenv('PWD', str(self.current_working_directory))
+            }
+        }
+    
     def search_in_files(self, directory: str, pattern: str, file_extensions: Optional[List[str]] = None, is_regex: bool = False) -> Dict[str, Any]:
         """Search for text patterns in files"""
         try:
@@ -425,7 +494,7 @@ class OptimizedToolRegistry:
                 if not work_dir.exists():
                     return {"success": False, "error": f"Working directory not found: {working_directory}"}
             else:
-                work_dir = self.base_directory
+                work_dir = self.current_working_directory  # Default to where beaglemind was run
             
             # Security check - prevent dangerous commands
             dangerous_patterns = [

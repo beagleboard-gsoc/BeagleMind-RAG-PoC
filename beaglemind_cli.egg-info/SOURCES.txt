@@ -16,3 +16,4 @@ src/qa_system.py
 src/retrieval.py
 src/router.py
 src/search_vectorstore.py
+src/tools_registry.py
