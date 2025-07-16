@@ -50,6 +50,7 @@ OPENAI_MODELS = [
 
 OLLAMA_MODELS = [
     "qwen3:1.7b",
+    "qwen2.5-coder:0.5b"
 ]
 
 LLM_BACKENDS = ["groq", "openai", "ollama"]
