@@ -24,11 +24,6 @@ Description-Content-Type: text/markdown
 Requires-Dist: click>=8.0.0
 Requires-Dist: rich>=12.0.0
 Requires-Dist: gradio>=4.0.0
-Requires-Dist: pymilvus>=2.3.0
-Requires-Dist: sentence-transformers>=2.2.0
-Requires-Dist: langchain>=0.1.0
-Requires-Dist: langchain-community>=0.0.10
-Requires-Dist: groq>=0.4.0
 Requires-Dist: python-dotenv>=1.0.0
 Requires-Dist: numpy>=1.21.0
 Requires-Dist: requests>=2.25.0

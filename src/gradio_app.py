@@ -4,7 +4,6 @@ import gradio as gr
 import logging
 import re
 from typing import List, Tuple
-from .retrieval import RetrievalSystem
 from .qa_system import QASystem
 
 # Setup logging
@@ -51,11 +50,9 @@ class GradioRAGApp:
             logger.info("Initializing RAG system...")
             
             # Initialize retrieval system
-            self.retrieval_system = RetrievalSystem(self.collection_name)
-            self.retrieval_system.create_collection(self.collection_name)
             
             # Initialize QA system
-            self.qa_system = QASystem(self.retrieval_system, self.collection_name)
+            self.qa_system = QASystem(self.collection_name)
             
             logger.info("RAG system initialized successfully")
             

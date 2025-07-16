@@ -17,7 +17,6 @@ from rich.spinner import Spinner
 from rich.live import Live
 import time
 
-from .retrieval import RetrievalSystem
 from .qa_system import QASystem
 from .config import *
 
@@ -51,6 +50,7 @@ OPENAI_MODELS = [
 
 OLLAMA_MODELS = [
     "qwen3:1.7b",
+    "qwen2.5-coder:0.5b"
 ]
 
 LLM_BACKENDS = ["groq", "openai", "ollama"]
@@ -67,13 +67,8 @@ BEAGLEMIND_BANNER = """
 
 class BeagleMindCLI:
     def __init__(self):
-        self.retrieval_system = None
         self.qa_system = None
         self.config = self.load_config()
-        
-        # Auto-initialize if previously configured
-        if self.config.get("initialized", False):
-            self._load_existing_systems()
         
     def load_config(self) -> Dict[str, Any]:
         """Load CLI configuration from file"""
@@ -81,8 +76,7 @@ class BeagleMindCLI:
             "collection_name": "beaglemind_w_chonkie",
             "default_backend": "groq",
             "default_model": GROQ_MODELS[0],
-            "default_temperature": 0.3,
-            "initialized": False
+            "default_temperature": 0.3
         }
         
         if os.path.exists(CLI_CONFIG_PATH):
@@ -109,57 +103,12 @@ class BeagleMindCLI:
         except Exception as e:
             console.print(f"[yellow]Warning: Could not save config: {e}[/yellow]")
     
-    def _load_existing_systems(self):
-        """Load existing systems if previously initialized"""
-        try:
-            collection_name = self.config.get("collection_name", "beaglemind_docs")
-            self.retrieval_system = RetrievalSystem(collection_name=collection_name)
-            self.qa_system = QASystem(self.retrieval_system, collection_name)
-            self.retrieval_system.create_collection(collection_name)
-            console.print("[green]✓ Loaded existing BeagleMind systems[/green]")
-        except Exception as e:
-            console.print(f"[yellow]Warning: Could not load existing systems: {e}[/yellow]")
-            self.config["initialized"] = False
-            self.save_config()
-    
-    def initialize_system(self, collection_name: str = None) -> bool:
-        """Initialize the retrieval and QA systems"""
-        try:
-            collection_name = collection_name or self.config.get("collection_name", "beaglemind_docs")
-            
-            with console.status("[bold green]Initializing BeagleMind..."):
-                self.retrieval_system = RetrievalSystem(collection_name=collection_name)
-                self.qa_system = QASystem(self.retrieval_system, collection_name)
-            
-            # Update config
-            self.config["collection_name"] = collection_name
-            self.config["initialized"] = True
-            self.save_config()
-            
-            console.print(f"[green]✓ BeagleMind initialized with collection: {collection_name}[/green]")
-            return True
-            
-        except Exception as e:
-            console.print(f"[red]Failed to initialize BeagleMind: {e}[/red]")
-            return False
-    
-    def check_initialization(self) -> bool:
-        """Check if the system is initialized"""
-        # First check if config says it's initialized
-        if not self.config.get("initialized", False):
-            console.print("[yellow]BeagleMind is not initialized. Run 'beaglemind init' first.[/yellow]")
-            return False
-        
-        # If config says initialized but objects are None, try to reload them
-        if not self.retrieval_system or not self.qa_system:
-            self._load_existing_systems()
-        
-        # Final check
-        if not self.retrieval_system or not self.qa_system:
-            console.print("[red]Failed to load BeagleMind systems. Please run 'beaglemind init'.[/red]")
-            return False
-        
-        return True
+    def get_qa_system(self):
+        """Get or create QA system instance"""
+        if not self.qa_system:
+            collection_name = self.config.get("collection_name", "beaglemind_w_chonkie")
+            self.qa_system = QASystem(collection_name=collection_name)
+        return self.qa_system
     
     def list_models(self, backend: str = None):
         """List available models for specified backend or all backends"""
@@ -224,8 +173,9 @@ class BeagleMindCLI:
              show_sources: bool = False):
         """Chat with BeagleMind using the specified parameters"""
         
-        if not self.check_initialization():
-            return
+        # Create QA system if not exists
+        if not self.qa_system:
+            self.qa_system = self.get_qa_system()
         
         if not prompt.strip():
             console.print("[yellow]Empty prompt provided.[/yellow]")
@@ -284,7 +234,7 @@ class BeagleMindCLI:
                     
                     for tool_result in result['tool_results']:
                         status = "✅ Success" if tool_result['result'].get('success', True) else "❌ Failed"
-                        result_preview = str(tool_result['result']).get('message', str(tool_result['result']))[:50] + "..."
+                        result_preview = str(tool_result['result'])[:50] + "..."
                         tool_table.add_row(
                             tool_result['tool'], 
                             status, 
@@ -330,8 +280,9 @@ class BeagleMindCLI:
                         show_sources: bool = False):
         """Start an interactive chat session with BeagleMind"""
         
-        if not self.check_initialization():
-            return
+        # Create QA system if not exists
+        if not self.qa_system:
+            self.qa_system = self.get_qa_system()
         
         # Use provided parameters or defaults
         backend = backend or self.config.get("default_backend", "groq")
@@ -481,8 +432,7 @@ class BeagleMindCLI:
             f"[cyan]Temperature:[/cyan] {temperature}\n"
             f"[cyan]Search Strategy:[/cyan] {search_strategy}\n"
             f"[cyan]Show Sources:[/cyan] {'Yes' if show_sources else 'No'}\n\n"
-            f"[dim]Collection:[/dim] {self.config.get('collection_name', 'N/A')}\n"
-            f"[dim]Initialized:[/dim] {'Yes' if self.config.get('initialized', False) else 'No'}",
+            f"[dim]Collection:[/dim] {self.config.get('collection_name', 'N/A')}",
             title="Configuration",
             border_style="magenta"
         )
@@ -494,31 +444,6 @@ class BeagleMindCLI:
 def cli():
     """BeagleMind CLI - Intelligent documentation assistant for Beagleboard projects"""
     pass
-
-@cli.command()
-@click.option('--collection', '-c', default="beaglemind_w_chonkie", 
-              help='Collection name to use (default: beaglemind_docs)')
-@click.option('--force', '-f', is_flag=True, 
-              help='Force re-initialization even if already initialized')
-def init(collection, force):
-    """Initialize BeagleMind with document collection"""
-    beaglemind = BeagleMindCLI()
-    
-    if beaglemind.config.get("initialized", False) and not force:
-        console.print(f"[yellow]BeagleMind is already initialized with collection: {beaglemind.config.get('collection_name')}[/yellow]")
-        console.print("[dim]Use --force to re-initialize[/dim]")
-        return
-    
-    console.print(f"[bold]Initializing BeagleMind with collection: {collection}[/bold]")
-    
-    if beaglemind.initialize_system(collection):
-        console.print("[green]🎉 BeagleMind initialization completed successfully![/green]")
-        console.print("\n[bold]Next steps:[/bold]")
-        console.print("• Run [cyan]beaglemind chat[/cyan] to start interactive mode")
-        console.print("• Run [cyan]beaglemind chat -p 'your question'[/cyan] for single questions")
-        console.print("• Run [cyan]beaglemind list-models[/cyan] to see available models")
-    else:
-        console.print("[red]❌ Initialization failed. Please check the error messages above.[/red]")
 
 @cli.command("list-models")
 @click.option('--backend', '-b', type=click.Choice(['groq', 'openai', 'ollama'], case_sensitive=False),
