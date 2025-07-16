@@ -19,9 +19,6 @@ class QASystem:
         self.backend_url = backend_url
         self.collection_name = collection_name
         
-        # Initialize the backend collection
-        self._initialize_backend(collection_name)
-        
         # Question type detection patterns
         self.question_patterns = {
             'code': [r'\bcode\b', r'\bfunction\b', r'\bclass\b', r'\bmethod\b', r'\bapi\b', r'\bimplement\b'],
@@ -32,25 +29,6 @@ class QASystem:
             'recent': [r'\blatest\b', r'\brecent\b', r'\bnew\b', r'\bupdated\b', r'\bcurrent\b']
         }
 
-    def _initialize_backend(self, collection_name: str):
-        """Initialize the backend collection via API call"""
-        try:
-            response = requests.post(
-                f"{self.backend_url}/initialize",
-                json={"collection_name": collection_name},
-                timeout=30
-            )
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success"):
-                    logger.info(f"Backend initialized successfully: {result.get('message')}")
-                else:
-                    logger.error(f"Backend initialization failed: {result.get('message')}")
-            else:
-                logger.error(f"Failed to initialize backend: {response.status_code} - {response.text}")
-        except Exception as e:
-            logger.error(f"Error initializing backend: {e}")
-
     def search(self, query: str, n_results: int = 10, rerank: bool = True) -> Dict[str, Any]:
         """Search documents using the backend API"""
         try:
@@ -58,6 +36,7 @@ class QASystem:
                 f"{self.backend_url}/retrieve",
                 json={
                     "query": query,
+                    "collection_name": self.collection_name,
                     "n_results": n_results,
                     "include_metadata": True,
                     "rerank": rerank
@@ -270,18 +249,76 @@ When answering, use the provided context AND your tools to give comprehensive, a
                             logger.error(f"Raw arguments: {tool_call['function']['arguments']}")
                             # Try to extract valid JSON or use defaults
                             function_args = {}
+                            
+                            # Enhanced argument extraction for different tools
+                            args_str = tool_call["function"]["arguments"]
+                            
                             if function_name == "run_command":
-                                # Extract command from malformed JSON
-                                args_str = tool_call["function"]["arguments"]
-                                if '"command":' in args_str:
-                                    try:
-                                        # Try to extract just the command
-                                        import re
-                                        command_match = re.search(r'"command":\s*"([^"]*)"', args_str)
+                                # Extract command from malformed JSON, handling multiline commands
+                                try:
+                                    import re
+                                    # Try multiple patterns to extract command
+                                    patterns = [
+                                        r'"command":\s*"([^"]*)"',  # Standard pattern
+                                        r'"command":\s*"([^"]*?)(?:"|$)',  # Pattern allowing unclosed quotes
+                                        r'"command":\s*([^,}]*)',  # Pattern without quotes
+                                    ]
+                                    
+                                    command_found = False
+                                    for pattern in patterns:
+                                        command_match = re.search(pattern, args_str, re.DOTALL)
                                         if command_match:
-                                            function_args = {"command": command_match.group(1)}
-                                    except Exception:
-                                        function_args = {"command": "echo 'Invalid command'"}
+                                            command = command_match.group(1).strip()
+                                            # Clean up command - remove extra whitespace and line breaks
+                                            command = ' '.join(command.split())
+                                            function_args = {"command": command}
+                                            command_found = True
+                                            break
+                                    
+                                    if not command_found:
+                                        # Extract anything that looks like a command
+                                        lines = args_str.split('\n')
+                                        for line in lines:
+                                            if 'command' in line.lower():
+                                                # Try to extract command from this line
+                                                cleaned = re.sub(r'[^a-zA-Z0-9\s\-\.\/_><=;]', ' ', line)
+                                                if cleaned.strip():
+                                                    function_args = {"command": "echo 'Extracted: " + cleaned.strip()[:50] + "'"}
+                                                    break
+                                        else:
+                                            function_args = {"command": "echo 'Could not parse command'"}
+                                            
+                                except Exception:
+                                    function_args = {"command": "echo 'Command parsing failed'"}
+                                    
+                            elif function_name == "write_file":
+                                # Extract file_path and content from malformed JSON
+                                try:
+                                    import re
+                                    file_path_match = re.search(r'"file_path":\s*"([^"]*)"', args_str)
+                                    content_match = re.search(r'"content":\s*"([^"]*)"', args_str, re.DOTALL)
+                                    
+                                    file_path = file_path_match.group(1) if file_path_match else "recovered_file.txt"
+                                    content = content_match.group(1) if content_match else "# Content could not be recovered"
+                                    
+                                    function_args = {
+                                        "file_path": file_path,
+                                        "content": content
+                                    }
+                                except Exception:
+                                    function_args = {
+                                        "file_path": "error_recovery.txt",
+                                        "content": "# Failed to parse original content"
+                                    }
+                            else:
+                                # For other functions, try basic recovery
+                                try:
+                                    # Attempt to fix JSON by removing problematic characters
+                                    cleaned_args = re.sub(r'[\n\r\t]', ' ', args_str)
+                                    cleaned_args = re.sub(r'\s+', ' ', cleaned_args)
+                                    function_args = json.loads(cleaned_args)
+                                except:
+                                    function_args = {}
                         except Exception as e:
                             logger.error(f"Unexpected error parsing arguments: {e}")
                             function_args = {}
