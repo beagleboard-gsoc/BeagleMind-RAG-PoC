@@ -321,8 +321,24 @@ class OptimizedToolRegistry:
             if create_directories:
                 safe_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Clean up content - handle escaped newlines from malformed LLM output
+            cleaned_content = content
+            
+            # Check if content contains literal \n instead of actual newlines
+            if '\\n' in content and '\n' not in content:
+                # Replace literal \n with actual newlines
+                cleaned_content = content.replace('\\n', '\n')
+            elif '\\n' in content and content.count('\\n') > content.count('\n'):
+                # Mixed case - more escaped than real newlines, likely malformed
+                cleaned_content = content.replace('\\n', '\n')
+            
+            # Also handle other common escape sequences that might be malformed
+            cleaned_content = cleaned_content.replace('\\t', '\t')
+            cleaned_content = cleaned_content.replace('\\"', '"')
+            cleaned_content = cleaned_content.replace("\\'", "'")
+            
             with open(safe_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+                f.write(cleaned_content)
             
             # Get file info
             stat = safe_path.stat()
@@ -332,7 +348,8 @@ class OptimizedToolRegistry:
                 "message": f"File written successfully: {file_path}",
                 "path": str(safe_path),
                 "size": stat.st_size,
-                "lines": len(content.splitlines())
+                "lines": len(cleaned_content.splitlines()),
+                "content_cleaned": cleaned_content != content
             }
         except Exception as e:
             return {"success": False, "error": f"Error writing file: {str(e)}"}
