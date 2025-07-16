@@ -8,12 +8,7 @@ beaglemind_cli.egg-info/requires.txt
 beaglemind_cli.egg-info/top_level.txt
 src/cli.py
 src/config.py
-src/forum_ingest.py
-src/github_direct_ingester.py
 src/gradio_app.py
 src/main.py
 src/qa_system.py
-src/retrieval.py
-src/router.py
-src/search_vectorstore.py
 src/tools_registry.py

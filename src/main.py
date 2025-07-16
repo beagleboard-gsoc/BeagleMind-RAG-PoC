@@ -1,21 +1,11 @@
 import os
 from . import config
-from .retrieval import RetrievalSystem
 from .qa_system import QASystem
 
 def setup_system():
     """Initialize and setup the RAG system"""
-    # Initialize retrieval system
-    retrieval_system = RetrievalSystem()
     
-    # Create collection
-    print("Creating Milvus collection...")
-    
-    
-    retrieval_system.create_collection()
-    
-    # Initialize QA system
-    qa_system = QASystem(retrieval_system)
+    qa_system = QASystem(retrieval_system, "beaglemind_w_chonkie")
     
     return retrieval_system, qa_system
 

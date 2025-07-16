@@ -17,7 +17,6 @@ from rich.spinner import Spinner
 from rich.live import Live
 import time
 
-from .retrieval import RetrievalSystem
 from .qa_system import QASystem
 from .config import *
 
@@ -67,7 +66,6 @@ BEAGLEMIND_BANNER = """
 
 class BeagleMindCLI:
     def __init__(self):
-        self.retrieval_system = None
         self.qa_system = None
         self.config = self.load_config()
         
@@ -113,9 +111,7 @@ class BeagleMindCLI:
         """Load existing systems if previously initialized"""
         try:
             collection_name = self.config.get("collection_name", "beaglemind_docs")
-            self.retrieval_system = RetrievalSystem(collection_name=collection_name)
-            self.qa_system = QASystem(self.retrieval_system, collection_name)
-            self.retrieval_system.create_collection(collection_name)
+            self.qa_system = QASystem(collection_name=collection_name)
             console.print("[green]✓ Loaded existing BeagleMind systems[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not load existing systems: {e}[/yellow]")
@@ -128,13 +124,8 @@ class BeagleMindCLI:
             collection_name = collection_name or self.config.get("collection_name", "beaglemind_docs")
             
             with console.status("[bold green]Initializing BeagleMind..."):
-                self.retrieval_system = RetrievalSystem(collection_name=collection_name)
-                self.qa_system = QASystem(self.retrieval_system, collection_name)
+                self.qa_system = QASystem(collection_name=collection_name)
             
-            # Update config
-            self.config["collection_name"] = collection_name
-            self.config["initialized"] = True
-            self.save_config()
             
             console.print(f"[green]✓ BeagleMind initialized with collection: {collection_name}[/green]")
             return True
@@ -151,11 +142,11 @@ class BeagleMindCLI:
             return False
         
         # If config says initialized but objects are None, try to reload them
-        if not self.retrieval_system or not self.qa_system:
+        if not self.qa_system:
             self._load_existing_systems()
         
         # Final check
-        if not self.retrieval_system or not self.qa_system:
+        if not self.qa_system:
             console.print("[red]Failed to load BeagleMind systems. Please run 'beaglemind init'.[/red]")
             return False
         
@@ -284,7 +275,7 @@ class BeagleMindCLI:
                     
                     for tool_result in result['tool_results']:
                         status = "✅ Success" if tool_result['result'].get('success', True) else "❌ Failed"
-                        result_preview = str(tool_result['result']).get('message', str(tool_result['result']))[:50] + "..."
+                        result_preview = str(tool_result['result'])[:50] + "..."
                         tool_table.add_row(
                             tool_result['tool'], 
                             status, 
@@ -503,11 +494,6 @@ def cli():
 def init(collection, force):
     """Initialize BeagleMind with document collection"""
     beaglemind = BeagleMindCLI()
-    
-    if beaglemind.config.get("initialized", False) and not force:
-        console.print(f"[yellow]BeagleMind is already initialized with collection: {beaglemind.config.get('collection_name')}[/yellow]")
-        console.print("[dim]Use --force to re-initialize[/dim]")
-        return
     
     console.print(f"[bold]Initializing BeagleMind with collection: {collection}[/bold]")
     
