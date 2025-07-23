@@ -1,7 +1,5 @@
 import gpiod
-
 import time
-
 gpio14 = gpiod.find_line('GPIO14')
 gpio14.request(consumer='beagle', type=gpiod.LINE_REQ_DIR_OUT, default_val=0)
 

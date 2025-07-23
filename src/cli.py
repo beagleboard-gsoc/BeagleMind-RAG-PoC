@@ -49,6 +49,7 @@ OPENAI_MODELS = [
 ]
 
 OLLAMA_MODELS = [
+    "smollm2:360m", 
     "qwen3:1.7b",
     "qwen2.5-coder:0.5b"
 ]
@@ -170,7 +171,7 @@ class BeagleMindCLI:
     
     def chat(self, prompt: str, backend: str = None, model: str = None, 
              temperature: float = None, search_strategy: str = "adaptive",
-             show_sources: bool = False):
+             show_sources: bool = False, use_tools: bool = True):
         """Chat with BeagleMind using the specified parameters"""
         
         # Create QA system if not exists
@@ -211,7 +212,7 @@ class BeagleMindCLI:
                     model_name=model,
                     temperature=temperature,
                     llm_backend=backend,
-                    use_tools=True  # Enable tool usage for interactive responses
+                    use_tools=use_tools  # Use the parameter passed to the method
                 )
             
             if result.get('success', True):
@@ -277,7 +278,7 @@ class BeagleMindCLI:
     
     def interactive_chat(self, backend: str = None, model: str = None, 
                         temperature: float = None, search_strategy: str = "adaptive",
-                        show_sources: bool = False):
+                        show_sources: bool = False, use_tools: bool = True):
         """Start an interactive chat session with BeagleMind"""
         
         # Create QA system if not exists
@@ -318,6 +319,7 @@ class BeagleMindCLI:
             f"• Type your questions naturally\n"
             f"• [cyan]/help[/cyan] - Show available commands\n"
             f"• [cyan]/sources[/cyan] - Toggle source display ({show_sources})\n"
+            f"• [cyan]/tools[/cyan] - Toggle tool usage ({'enabled' if use_tools else 'disabled'})\n"
             f"• [cyan]/config[/cyan] - Show current configuration\n"
             f"• [cyan]/clear[/cyan] - Clear screen\n"
             f"• [cyan]/exit[/cyan] or [cyan]/quit[/cyan] - Exit chat\n"
@@ -356,6 +358,11 @@ class BeagleMindCLI:
                         console.print(f"[green]✓ Source display: {'enabled' if show_sources else 'disabled'}[/green]")
                         continue
                     
+                    elif user_input.lower() == '/tools':
+                        use_tools = not use_tools
+                        console.print(f"[green]✓ Tool usage: {'enabled' if use_tools else 'disabled'}[/green]")
+                        continue
+                    
                     elif user_input.lower() == '/config':
                         self._show_chat_config(backend, model, temperature, search_strategy, show_sources)
                         continue
@@ -379,7 +386,8 @@ class BeagleMindCLI:
                         model=model,
                         temperature=temperature,
                         search_strategy=search_strategy,
-                        show_sources=show_sources
+                        show_sources=show_sources,
+                        use_tools=use_tools
                     )
                     
                     console.print("\n" + "─" * 60 + "\n")
@@ -402,6 +410,7 @@ class BeagleMindCLI:
             f"[green]Chat Commands:[/green]\n"
             f"• [cyan]/help[/cyan] - Show this help message\n"
             f"• [cyan]/sources[/cyan] - Toggle source information display\n"
+            f"• [cyan]/tools[/cyan] - Toggle tool usage (file operations, commands, etc.)\n"
             f"• [cyan]/config[/cyan] - Show current session configuration\n"
             f"• [cyan]/clear[/cyan] - Clear the screen\n"
             f"• [cyan]/exit[/cyan] or [cyan]/quit[/cyan] - End the session\n\n"
@@ -413,10 +422,11 @@ class BeagleMindCLI:
             f"• 'List files in the current directory'\n"
             f"• 'Analyze the code in main.py'\n\n"
             f"[yellow]Tips:[/yellow]\n"
-            f"• BeagleMind can create and edit files automatically\n"
+            f"• BeagleMind can create and edit files automatically (when tools are enabled)\n"
             f"• Ask for specific BeagleBoard/BeagleY-AI configurations\n"
             f"• Request code analysis and improvements\n"
-            f"• Use natural language - no special syntax needed",
+            f"• Use natural language - no special syntax needed\n"
+            f"• Disable tools with [cyan]/tools[/cyan] for text-only responses",
             title="📚 Help",
             border_style="blue"
         )
@@ -466,11 +476,16 @@ def list_models(backend):
               default='adaptive', help='Search strategy to use')
 @click.option('--sources', is_flag=True, 
               help='Show source information with the response')
+@click.option('--no-tools', is_flag=True,
+              help='Disable tool usage - only provide text responses without file operations')
 @click.option('--interactive', '-i', is_flag=True,
               help='Force interactive chat session')
-def chat(prompt, backend, model, temperature, strategy, sources, interactive):
+def chat(prompt, backend, model, temperature, strategy, sources, no_tools, interactive):
     """Chat with BeagleMind - Interactive mode by default, or single prompt with -p"""
     beaglemind = BeagleMindCLI()
+    
+    # Convert no_tools flag to use_tools boolean
+    use_tools = not no_tools
     
     # Start interactive mode by default when no prompt is provided
     if not prompt:
@@ -480,7 +495,8 @@ def chat(prompt, backend, model, temperature, strategy, sources, interactive):
             model=model,
             temperature=temperature,
             search_strategy=strategy,
-            show_sources=sources
+            show_sources=sources,
+            use_tools=use_tools
         )
     else:
         # Single prompt mode when --prompt is provided
@@ -490,7 +506,8 @@ def chat(prompt, backend, model, temperature, strategy, sources, interactive):
             model=model,
             temperature=temperature,
             search_strategy=strategy,
-            show_sources=sources
+            show_sources=sources,
+            use_tools=use_tools
         )
 
 
