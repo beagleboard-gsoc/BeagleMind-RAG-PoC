@@ -22,14 +22,6 @@ class QASystem:
         if backend_url is None:
             # Try to get from environment variables first
             backend_url = RAG_BACKEND_URL 
-            
-            # Try to import and get from config file
-            try:
-                from .config import BACKEND_URL
-                backend_url = BACKEND_URL
-            except (ImportError, AttributeError):
-                # Config doesn't have BACKEND_URL, use environment or default
-                pass
         
         self.backend_url = backend_url
         self.collection_name = collection_name
