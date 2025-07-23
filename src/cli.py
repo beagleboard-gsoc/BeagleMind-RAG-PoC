@@ -49,6 +49,8 @@ OPENAI_MODELS = [
 ]
 
 OLLAMA_MODELS = [
+    "huihui_ai/qwen2.5-coder-abliterate:0.5b",
+    "deepseek-r1:1.5b"
     "smollm2:135m",
     "smollm2:360m", 
     "qwen3:1.7b",
