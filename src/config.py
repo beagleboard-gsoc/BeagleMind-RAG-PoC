@@ -3,12 +3,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Milvus/Zilliz Cloud connection (online vector store)
-MILVUS_HOST = os.getenv("MILVUS_HOST")
-MILVUS_PORT = int(os.getenv("MILVUS_PORT", 443))
-MILVUS_USER = os.getenv("MILVUS_USER")
-MILVUS_PASSWORD = os.getenv("MILVUS_PASSWORD")
-MILVUS_TOKEN = os.getenv("MILVUS_TOKEN")
 MILVUS_URI = os.getenv("MILVUS_URI")
 
 # Groq
@@ -28,3 +22,5 @@ EMBEDDINGS_MODEL = "BAAI/bge-m3"
 # Reranking Configuration
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 RERANK_TOP_K = 5
+
+RAG_BACKEND_URL = os.getenv('RAG_BACKEND_URL', 'http://localhost:8000/api')

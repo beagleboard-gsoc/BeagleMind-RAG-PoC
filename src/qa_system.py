@@ -5,8 +5,10 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
-from .config import GROQ_API_KEY
+from .config import GROQ_API_KEY, RAG_BACKEND_URL
 from .tools_registry import enhanced_tool_registry_optimized as tool_registry
+
+
 # Setup logging - suppress verbose output
 logging.basicConfig(level=logging.CRITICAL)  # Only show critical errors
 logger = logging.getLogger(__name__)
@@ -15,7 +17,20 @@ logger.setLevel(logging.CRITICAL)
 
 
 class QASystem:
-    def __init__(self, backend_url: str = "http://localhost:8000/api", collection_name: str = "beaglemind_col"):
+    def __init__(self, backend_url: str = None, collection_name: str = "beaglemind_col"):
+        # Get backend URL from config/environment with fallback to localhost
+        if backend_url is None:
+            # Try to get from environment variables first
+            backend_url = RAG_BACKEND_URL 
+            
+            # Try to import and get from config file
+            try:
+                from .config import BACKEND_URL
+                backend_url = BACKEND_URL
+            except (ImportError, AttributeError):
+                # Config doesn't have BACKEND_URL, use environment or default
+                pass
+        
         self.backend_url = backend_url
         self.collection_name = collection_name
         
