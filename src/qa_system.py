@@ -5,7 +5,7 @@ import requests
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import re
-from .config import GROQ_API_KEY, RAG_BACKEND_URL
+from .config import GROQ_API_KEY, RAG_BACKEND_URL, COLLECTION_NAME
 from .tools_registry import enhanced_tool_registry_optimized as tool_registry
 
 
@@ -17,14 +17,14 @@ logger.setLevel(logging.CRITICAL)
 
 
 class QASystem:
-    def __init__(self, backend_url: str = None, collection_name: str = "beaglemind_col"):
+    def __init__(self, backend_url: str = None, collection_name: str = None):
         # Get backend URL from config/environment with fallback to localhost
         if backend_url is None:
             # Try to get from environment variables first
             backend_url = RAG_BACKEND_URL 
         
         self.backend_url = backend_url
-        self.collection_name = collection_name
+        self.collection_name = collection_name or COLLECTION_NAME
         
         # Question type detection patterns
         self.question_patterns = {

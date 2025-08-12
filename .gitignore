@@ -8,3 +8,4 @@ src/filtered_threads.txt
 src/tools/__pycache__
 data_scraping
 model_onnx
+onnx

@@ -28,17 +28,14 @@ An intelligent documentation assistant CLI tool for Beagleboard projects that us
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd rag_poc
+git clone https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC
+cd BeagleMind-RAG-PoC
 
 # Install in development mode
 pip install -e .
-
-# Or install dependencies manually
-pip install -r requirements.txt
 ```
 
-### Using pip (when published)
+### Using pip
 
 ```bash
 pip install beaglemind-cli
@@ -46,20 +43,8 @@ pip install beaglemind-cli
 
 ## Quick Start
 
-### 1. Initialize BeagleMind
 
-Before using the CLI, you need to initialize the system and load the knowledge base:
-
-```bash
-beaglemind init
-```
-
-This will:
-- Connect to the Milvus vector database
-- Load the document collection
-- Set up the QA system
-
-### 2. List Available Models
+### 1. List Available Models
 
 See what language models are available:
 
@@ -72,7 +57,7 @@ beaglemind list-models --backend groq
 beaglemind list-models --backend ollama
 ```
 
-### 3. Start Chatting
+### 2. Start Chatting
 
 Ask questions about the documentation:
 
@@ -88,22 +73,6 @@ beaglemind chat -p "What are the pin configurations?" --sources
 ```
 
 ## CLI Commands
-
-### `beaglemind init`
-
-Initialize the BeagleMind system.
-
-**Options:**
-- `--collection, -c`: Collection name to use (default: beaglemind_docs)
-- `--force, -f`: Force re-initialization
-
-**Examples:**
-```bash
-beaglemind init
-beaglemind init --collection my_docs
-beaglemind init --force
-```
-
 ### `beaglemind list-models`
 
 List available language models.
@@ -150,19 +119,53 @@ beaglemind chat -p "How to implement I2C communication?" --sources
 beaglemind chat -p "What are the system requirements?" --strategy context_aware
 ```
 
-## Configuration
+### Interactive Chat Mode
 
-BeagleMind stores configuration in `~/.beaglemind_cli_config.json`:
+You can start an interactive multi-turn chat session (REPL) that remembers context and lets you toggle features live.
 
-```json
-{
-  "collection_name": "beaglemind_docs",
-  "default_backend": "groq", 
-  "default_model": "llama-3.3-70b-versatile",
-  "default_temperature": 0.3,
-  "initialized": true
-}
+Start it by simply running the chat command without a prompt:
+
+```bash
+beaglemind chat
 ```
+
+Or force it explicitly:
+
+```bash
+beaglemind chat --interactive
+```
+
+During the session you can use these inline commands (type them as messages):
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands and tips |
+| `/sources` | Toggle display of source documents for answers |
+| `/tools` | Enable/disable tool usage (file creation, code analysis, etc.) |
+| `/config` | Show current backend/model/session settings |
+| `/clear` | Clear the screen and keep session state |
+| `/exit` or `/quit` | End the interactive session |
+
+Example interactive flow:
+
+```text
+$ beaglemind chat
+BeagleMind (1) > How do I configure GPIO?
+...answer...
+BeagleMind (2) > /sources
+✓ Source display: enabled
+BeagleMind (3) > Give me a Python example
+...answer with sources...
+BeagleMind (4) > /tools
+✓ Tool usage: disabled
+BeagleMind (5) > /exit
+```
+
+Tips:
+1. Use `/sources` when you need provenance; turn it off for faster, cleaner output.
+2. Disable tools (`/tools`) if you want read-only behavior.
+3. Ask follow-ups naturally; prior Q&A stays in context for better answers.
+
 
 ## Environment Setup
 
@@ -194,19 +197,6 @@ export OPENAI_API_KEY="your-api-key-here"
    ollama serve
    ```
 
-### Vector Database
-
-Configure Milvus/Zilliz connection in `.env`:
-
-```bash
-MILVUS_HOST=your-host
-MILVUS_PORT=443
-MILVUS_USER=your-username  
-MILVUS_PASSWORD=your-password
-MILVUS_TOKEN=your-token
-MILVUS_URI=your-uri
-```
-
 ## Available Models
 
 ### Groq (Cloud)
@@ -226,13 +216,6 @@ MILVUS_URI=your-uri
 
 ### Ollama (Local)
 - qwen3:1.7b
-
-## Search Strategies
-
-- **adaptive**: Automatically selects best strategy based on question type
-- **multi_query**: Uses multiple related queries for comprehensive results
-- **context_aware**: Includes surrounding context from documents
-- **default**: Standard semantic search
 
 ## Tips for Best Results
 
@@ -305,6 +288,5 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- GitHub Issues: https://github.com/beagleboard/beaglemind/issues
-- Documentation: https://beaglemind.readthedocs.io
-- Community: BeagleBoard forums
+- GitHub Issues: [Create an issue](https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC/issues)
+- Community: [BeagleBoard forums](https://forum.beagleboard.org/)

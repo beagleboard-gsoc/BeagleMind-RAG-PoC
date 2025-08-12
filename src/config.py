@@ -23,4 +23,7 @@ EMBEDDINGS_MODEL = "BAAI/bge-m3"
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 RERANK_TOP_K = 5
 
+# Collection Configuration
+COLLECTION_NAME = "beaglemind_col"
+
 RAG_BACKEND_URL = os.getenv('RAG_BACKEND_URL', 'http://localhost:8000/api')

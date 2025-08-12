@@ -77,7 +77,7 @@ class BeagleMindCLI:
     def load_config(self) -> Dict[str, Any]:
         """Load CLI configuration from file"""
         default_config = {
-            "collection_name": "beaglemind_w_chonkie",
+            "collection_name": COLLECTION_NAME,
             "default_backend": "groq",
             "default_model": GROQ_MODELS[0],
             "default_temperature": 0.3
@@ -110,7 +110,7 @@ class BeagleMindCLI:
     def get_qa_system(self):
         """Get or create QA system instance"""
         if not self.qa_system:
-            collection_name = self.config.get("collection_name", "beaglemind_w_chonkie")
+            collection_name = self.config.get("collection_name", COLLECTION_NAME)
             self.qa_system = QASystem(collection_name=collection_name)
         return self.qa_system
     

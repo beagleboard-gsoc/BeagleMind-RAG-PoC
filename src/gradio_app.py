@@ -5,6 +5,7 @@ import logging
 import re
 from typing import List, Tuple
 from .qa_system import QASystem
+from . import config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -34,9 +35,9 @@ OLLAMA_MODELS = [
 LLM_BACKENDS = ["groq", "openai", "ollama"]
 # beaglemind_w_chonkie to get old collection
 class GradioRAGApp:
-    def __init__(self, collection_name: str = "beaglemind_docs"):
+    def __init__(self, collection_name: str = None):
         """Initialize the Gradio RAG application"""
-        self.collection_name = collection_name
+        self.collection_name = collection_name or config.COLLECTION_NAME
         self.retrieval_system = None
         self.qa_system = None
         self.selected_model = GROQ_MODELS[0]

@@ -7,7 +7,7 @@ name = "beaglemind-cli"
 version = "1.0.0"
 description = "Intelligent documentation assistant CLI for Beagleboard projects"
 authors = [
-    {name = "BeagleMind Team", email = "info@beagleboard.org"}
+    {name = "Fayez Zouari", email = "fayez.zouari@insat.ucar.tn"}
 ]
 readme = "README.md"
 requires-python = ">=3.8"
@@ -32,7 +32,8 @@ dependencies = [
     "gradio>=4.0.0",
     "python-dotenv>=1.0.0",
     "numpy>=1.21.0",
-    "requests>=2.25.0"
+    "requests>=2.25.0",
+    "openai"
 ]
 
 [project.optional-dependencies]
@@ -44,10 +45,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/beagleboard/beaglemind"
-Repository = "https://github.com/beagleboard/beaglemind"
-Documentation = "https://beaglemind.readthedocs.io"
-"Bug Tracker" = "https://github.com/beagleboard/beaglemind/issues"
+Homepage = "https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC"
+Repository = "https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC"
+"Bug Tracker" = "https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC/issues"
 
 [project.scripts]
 beaglemind = "src.cli:cli"
