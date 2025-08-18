@@ -41,6 +41,37 @@ pip install -e .
 pip install beaglemind-cli
 ```
 
+
+## Environment Setup
+
+### For Groq (Cloud)
+
+Set your Groq API key:
+
+```bash
+export GROQ_API_KEY="your-api-key-here"
+```
+
+### For OpenAI (Cloud)
+
+Set your OpenAI API key:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+### For Ollama (Local)
+
+1. Install Ollama: https://ollama.ai
+2. Pull a supported model:
+   ```bash
+   ollama pull qwen3:1.7b
+   ```
+3. Ensure Ollama is running:
+   ```bash
+   ollama serve
+   ```
+
 ## Quick Start
 
 
@@ -167,36 +198,6 @@ Tips:
 3. Ask follow-ups naturally; prior Q&A stays in context for better answers.
 
 
-## Environment Setup
-
-### For Groq (Cloud)
-
-Set your Groq API key:
-
-```bash
-export GROQ_API_KEY="your-api-key-here"
-```
-
-### For OpenAI (Cloud)
-
-Set your OpenAI API key:
-
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-```
-
-### For Ollama (Local)
-
-1. Install Ollama: https://ollama.ai
-2. Pull a supported model:
-   ```bash
-   ollama pull qwen3:1.7b
-   ```
-3. Ensure Ollama is running:
-   ```bash
-   ollama serve
-   ```
-
 ## Available Models
 
 ### Groq (Cloud)
@@ -216,6 +217,8 @@ export OPENAI_API_KEY="your-api-key-here"
 
 ### Ollama (Local)
 - qwen3:1.7b
+- smollm2:360m
+- deepseek-r1:1.5b
 
 ## Tips for Best Results
 

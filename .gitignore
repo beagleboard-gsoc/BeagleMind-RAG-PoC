@@ -9,3 +9,5 @@ src/tools/__pycache__
 data_scraping
 model_onnx
 onnx
+qwen25
+beaglemind_cli.egg-info
