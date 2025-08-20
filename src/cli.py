@@ -54,7 +54,8 @@ OLLAMA_MODELS = [
     "smollm2:135m",
     "smollm2:360m", 
     "qwen3:1.7b",
-    "qwen2.5-coder:0.5b"
+    "qwen2.5-coder:0.5b",
+    "gemma3:270m"
 ]
 
 LLM_BACKENDS = ["groq", "openai", "ollama"]
