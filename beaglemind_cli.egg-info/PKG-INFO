@@ -2,12 +2,11 @@ Metadata-Version: 2.4
 Name: beaglemind-cli
 Version: 1.0.0
 Summary: Intelligent documentation assistant CLI for Beagleboard projects
-Author-email: BeagleMind Team <info@beagleboard.org>
+Author-email: Fayez Zouari <fayez.zouari@insat.ucar.tn>
 License: MIT
-Project-URL: Homepage, https://github.com/beagleboard/beaglemind
-Project-URL: Repository, https://github.com/beagleboard/beaglemind
-Project-URL: Documentation, https://beaglemind.readthedocs.io
-Project-URL: Bug Tracker, https://github.com/beagleboard/beaglemind/issues
+Project-URL: Homepage, https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC
+Project-URL: Repository, https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC
+Project-URL: Bug Tracker, https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC/issues
 Keywords: cli,documentation,AI,RAG,beagleboard
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
@@ -27,6 +26,7 @@ Requires-Dist: gradio>=4.0.0
 Requires-Dist: python-dotenv>=1.0.0
 Requires-Dist: numpy>=1.21.0
 Requires-Dist: requests>=2.25.0
+Requires-Dist: openai
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: black>=22.0.0; extra == "dev"
@@ -63,38 +63,54 @@ An intelligent documentation assistant CLI tool for Beagleboard projects that us
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd rag_poc
+git clone https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC
+cd BeagleMind-RAG-PoC
 
 # Install in development mode
 pip install -e .
-
-# Or install dependencies manually
-pip install -r requirements.txt
 ```
 
-### Using pip (when published)
+### Using pip
 
 ```bash
 pip install beaglemind-cli
 ```
 
-## Quick Start
 
-### 1. Initialize BeagleMind
+## Environment Setup
 
-Before using the CLI, you need to initialize the system and load the knowledge base:
+### For Groq (Cloud)
+
+Set your Groq API key:
 
 ```bash
-beaglemind init
+export GROQ_API_KEY="your-api-key-here"
 ```
 
-This will:
-- Connect to the Milvus vector database
-- Load the document collection
-- Set up the QA system
+### For OpenAI (Cloud)
 
-### 2. List Available Models
+Set your OpenAI API key:
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+### For Ollama (Local)
+
+1. Install Ollama: https://ollama.ai
+2. Pull a supported model:
+   ```bash
+   ollama pull qwen3:1.7b
+   ```
+3. Ensure Ollama is running:
+   ```bash
+   ollama serve
+   ```
+
+## Quick Start
+
+
+### 1. List Available Models
 
 See what language models are available:
 
@@ -107,7 +123,7 @@ beaglemind list-models --backend groq
 beaglemind list-models --backend ollama
 ```
 
-### 3. Start Chatting
+### 2. Start Chatting
 
 Ask questions about the documentation:
 
@@ -123,22 +139,6 @@ beaglemind chat -p "What are the pin configurations?" --sources
 ```
 
 ## CLI Commands
-
-### `beaglemind init`
-
-Initialize the BeagleMind system.
-
-**Options:**
-- `--collection, -c`: Collection name to use (default: beaglemind_docs)
-- `--force, -f`: Force re-initialization
-
-**Examples:**
-```bash
-beaglemind init
-beaglemind init --collection my_docs
-beaglemind init --force
-```
-
 ### `beaglemind list-models`
 
 List available language models.
@@ -185,62 +185,53 @@ beaglemind chat -p "How to implement I2C communication?" --sources
 beaglemind chat -p "What are the system requirements?" --strategy context_aware
 ```
 
-## Configuration
+### Interactive Chat Mode
 
-BeagleMind stores configuration in `~/.beaglemind_cli_config.json`:
+You can start an interactive multi-turn chat session (REPL) that remembers context and lets you toggle features live.
 
-```json
-{
-  "collection_name": "beaglemind_docs",
-  "default_backend": "groq", 
-  "default_model": "llama-3.3-70b-versatile",
-  "default_temperature": 0.3,
-  "initialized": true
-}
-```
-
-## Environment Setup
-
-### For Groq (Cloud)
-
-Set your Groq API key:
+Start it by simply running the chat command without a prompt:
 
 ```bash
-export GROQ_API_KEY="your-api-key-here"
+beaglemind chat
 ```
 
-### For OpenAI (Cloud)
-
-Set your OpenAI API key:
+Or force it explicitly:
 
 ```bash
-export OPENAI_API_KEY="your-api-key-here"
+beaglemind chat --interactive
 ```
 
-### For Ollama (Local)
+During the session you can use these inline commands (type them as messages):
 
-1. Install Ollama: https://ollama.ai
-2. Pull a supported model:
-   ```bash
-   ollama pull qwen3:1.7b
-   ```
-3. Ensure Ollama is running:
-   ```bash
-   ollama serve
-   ```
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands and tips |
+| `/sources` | Toggle display of source documents for answers |
+| `/tools` | Enable/disable tool usage (file creation, code analysis, etc.) |
+| `/config` | Show current backend/model/session settings |
+| `/clear` | Clear the screen and keep session state |
+| `/exit` or `/quit` | End the interactive session |
 
-### Vector Database
+Example interactive flow:
 
-Configure Milvus/Zilliz connection in `.env`:
-
-```bash
-MILVUS_HOST=your-host
-MILVUS_PORT=443
-MILVUS_USER=your-username  
-MILVUS_PASSWORD=your-password
-MILVUS_TOKEN=your-token
-MILVUS_URI=your-uri
+```text
+$ beaglemind chat
+BeagleMind (1) > How do I configure GPIO?
+...answer...
+BeagleMind (2) > /sources
+✓ Source display: enabled
+BeagleMind (3) > Give me a Python example
+...answer with sources...
+BeagleMind (4) > /tools
+✓ Tool usage: disabled
+BeagleMind (5) > /exit
 ```
+
+Tips:
+1. Use `/sources` when you need provenance; turn it off for faster, cleaner output.
+2. Disable tools (`/tools`) if you want read-only behavior.
+3. Ask follow-ups naturally; prior Q&A stays in context for better answers.
+
 
 ## Available Models
 
@@ -261,13 +252,8 @@ MILVUS_URI=your-uri
 
 ### Ollama (Local)
 - qwen3:1.7b
-
-## Search Strategies
-
-- **adaptive**: Automatically selects best strategy based on question type
-- **multi_query**: Uses multiple related queries for comprehensive results
-- **context_aware**: Includes surrounding context from documents
-- **default**: Standard semantic search
+- smollm2:360m
+- deepseek-r1:1.5b
 
 ## Tips for Best Results
 
@@ -340,6 +326,5 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- GitHub Issues: https://github.com/beagleboard/beaglemind/issues
-- Documentation: https://beaglemind.readthedocs.io
-- Community: BeagleBoard forums
+- GitHub Issues: [Create an issue](https://github.com/beagleboard-gsoc/BeagleMind-RAG-PoC/issues)
+- Community: [BeagleBoard forums](https://forum.beagleboard.org/)

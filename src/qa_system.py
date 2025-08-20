@@ -36,7 +36,7 @@ class QASystem:
             'recent': [r'\blatest\b', r'\brecent\b', r'\bnew\b', r'\bupdated\b', r'\bcurrent\b']
         }
 
-    def search(self, query: str, n_results: int = 10, rerank: bool = True) -> Dict[str, Any]:
+    def search(self, query: str, n_results: int = 5, rerank: bool = True) -> Dict[str, Any]:
         """Search documents using the backend API"""
         try:
             response = requests.post(
@@ -99,8 +99,8 @@ class QASystem:
             Dictionary with the conversation and results
         """
         try:
-            # Get context from retrieval system first
-            search_results = self.search(question, n_results=10, rerank=True)
+            # Get context from retrieval system first (reduced for efficiency)
+            search_results = self.search(question, n_results=5, rerank=True)
             context_docs = []
             
             if search_results and search_results.get('documents') and search_results['documents'] and search_results['documents'][0]:
@@ -153,49 +153,19 @@ class QASystem:
             # Get machine info for context
             machine_info = tool_registry.get_machine_info()
             
-            # Create enhanced system prompt with context
-            system_prompt = f"""You are BeagleMind, an expert documentation assistant for the Beagleboard project with advanced tool capabilities.
+            # Create concise system prompt with essential rules and context
+            system_prompt = f"""You are BeagleMind, a concise, reliable assistant for Beagleboard docs and code.
 
-**MACHINE CONTEXT:**
-- Hostname: {machine_info['machine_info'].get('hostname', 'unknown')}
-- OS: {machine_info['machine_info'].get('os', 'unknown')} {machine_info['machine_info'].get('os_release', '')}
-- User: {machine_info['machine_info'].get('user', 'unknown')}
-- Current Directory: {machine_info['current_working_directory']}
-- Base Directory: {machine_info['base_directory']}
+Tools (call when needed): read_file, write_file, edit_file_lines, search_in_files, run_command, analyze_code, show_directory_tree.
 
-**IMPORTANT PATH BEHAVIOR:**
-- When no absolute path is specified, files will be created/edited in: {machine_info['current_working_directory']}
-- Use relative paths for files in the current working directory
-- Always confirm the full path when creating/editing files
+Rules:
+- Use tools to read/write/modify files or run commands; don't just describe.
+- Working dir: {machine_info['current_working_directory']} (base: {machine_info['base_directory']}). Prefer relative paths and confirm created paths.
+- Keep answers brief, actionable, and grounded in context.
 
-You have access to powerful tools that allow you to:
-- read_file: Read contents of files
-- write_file: Create or overwrite files with content
-- edit_file_lines: Edit specific lines in files with precise operations
-- search_in_files: Search for patterns in files and directories
-- run_command: Execute shell commands safely
-- analyze_code: Analyze code for syntax, style, and ROS best practices
-- show_directory_tree: Show directory structure using tree command
-
-**CRITICAL TOOL USAGE RULES:**
-1. **ALWAYS use tools when appropriate** - Don't just describe, actually perform actions
-2. **File operations**: When users ask to create, modify, or read files, USE the tools
-3. **Code generation**: Always save generated code to files using write_file
-4. **Analysis requests**: Use analyze_code for code quality checks
-5. **Search requests**: Use search_in_files to find information in codebases
-6. **Command execution**: Use run_command for system operations
-
-**RESPONSE GUIDELINES:**
-- Provide complete, working solutions
-- Use proper BeagleBoard/BeagleY-AI specific configurations
-- Follow embedded systems best practices
-- Generate production-ready code with error handling
-- Explain each tool usage clearly
-
-**CONTEXT INFORMATION:**
+Context:
 {context}
-
-When answering, use the provided context AND your tools to give comprehensive, actionable responses."""
+"""
 
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -663,17 +633,43 @@ When answering, use the provided context AND your tools to give comprehensive, a
             question, n_results=n_results, rerank=True
         )
         
+        # If nothing found, retry with a broader search (no rerank)
         if not search_results or not search_results.get('documents') or not search_results['documents'][0]:
-            return {
-                "answer": "No relevant documents found for your question.",
-                "sources": [],
-                "search_info": {
-                    "strategy": search_strategy,
-                    "question_types": None,
-                    "filters": None,
-                    "total_found": 0        
+            retry_results = self.search(question, n_results=n_results, rerank=False)
+            if retry_results and retry_results.get('documents') and retry_results['documents'][0]:
+                search_results = retry_results
+            else:
+                # Graceful fallback: answer without context
+                fallback_prompt = (
+                    "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
+                    "No repository context is available for this question. Provide a practical, step-by-step answer "
+                    "with a small code example when helpful. Keep it accurate and concise.\n\n"
+                    f"Question: {question}\n\nAnswer:"
+                )
+                try:
+                    if llm_backend.lower() == "groq":
+                        answer = self._get_groq_response(fallback_prompt, model_name, temperature)
+                    elif llm_backend.lower() == "openai":
+                        answer = self._get_openai_response(fallback_prompt, model_name, temperature)
+                    elif llm_backend.lower() == "ollama":
+                        answer = self._get_ollama_response(fallback_prompt, model_name, temperature)
+                    else:
+                        raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+                except Exception as e:
+                    logger.error(f"LLM fallback failed: {e}")
+                    answer = "I couldn't generate an answer right now. Please try again."
+                
+                return {
+                    "answer": answer,
+                    "sources": [],
+                    "search_info": {
+                        "strategy": search_strategy,
+                        "question_types": None,
+                        "filters": None,
+                        "total_found": 0,
+                        "used_fallback": True
+                    }
                 }
-            }
         
         # Process documents directly since reranking is done by the API
         documents = search_results['documents'][0]
@@ -697,14 +693,35 @@ When answering, use the provided context AND your tools to give comprehensive, a
             })
         
         if not context_docs:
+            # Use fallback LLM answer without context
+            fallback_prompt = (
+                "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
+                "No repository context is available for this question. Provide a practical, step-by-step answer "
+                "with a small code example when helpful. Keep it accurate and concise.\n\n"
+                f"Question: {question}\n\nAnswer:"
+            )
+            try:
+                if llm_backend.lower() == "groq":
+                    answer = self._get_groq_response(fallback_prompt, model_name, temperature)
+                elif llm_backend.lower() == "openai":
+                    answer = self._get_openai_response(fallback_prompt, model_name, temperature)
+                elif llm_backend.lower() == "ollama":
+                    answer = self._get_ollama_response(fallback_prompt, model_name, temperature)
+                else:
+                    raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+            except Exception as e:
+                logger.error(f"LLM fallback failed: {e}")
+                answer = "I couldn't generate an answer right now. Please try again."
+            
             return {
-                "answer": "No relevant documents found.",
+                "answer": answer,
                 "sources": [],
                 "search_info": {
                     "strategy": search_strategy,
                     "question_types": None,
                     "filters": None,
-                    "total_found": 0
+                    "total_found": 0,
+                    "used_fallback": True
                 }
             }
         
@@ -796,75 +813,30 @@ When answering, use the provided context AND your tools to give comprehensive, a
         
         if is_file_request:
             # Use a more direct prompt for file operations
-            system_prompt = '''You are BeagleMind, a file operation assistant. You have access to file tools and MUST use them when users request file operations.
+            system_prompt = '''You are BeagleMind focused on file operations.
 
-AVAILABLE TOOLS:
-- write_file(file_path, content): Create or overwrite a file with content
+Rule: When asked to create/make/generate/write a file, CALL write_file(file_path, content). Do not only describe.
 
-CRITICAL: When a user asks to create, make, generate, or write a file, you MUST call the write_file function. Do not just provide code - actually create the file.
-
-EXAMPLE:
-User: "Create a Python file to blink an LED"
-Response: I'll create a Python file for LED blinking on BeagleY-AI.
-
-[THEN CALL: write_file("led_blink.py", "python_code_here")]
-
-The code content explains the implementation.'''
+Tool:
+- write_file(file_path, content)
+'''
         else:
             # Use the full system prompt for other requests
-            system_prompt = '''You are BeagleMind, an expert documentation assistant for the Beagleboard project.
+            system_prompt = '''You are BeagleMind for Beagleboard docs/code.
 
-Provide accurate, helpful answers using only the provided context documents.
+Use only the provided context. Keep answers concise and actionable.
 
-**AVAILABLE TOOLS:**
-You have access to powerful file operation tools that you MUST use when appropriate:
-- read_file(file_path): Read content from a single file
-- write_file(file_path, content): Write content to a file (overwrites existing) - USE THIS MOST
-- edit_file_lines(file_path, edits): Edit specific lines in files with precise operations
-- search_in_files(directory, pattern): Search for patterns in files and directories
-- run_command(command): Execute shell commands safely
-- analyze_code(file_path): Analyze code for syntax, style, and ROS best practices
-- list_directory(directory): List directory contents with filtering
+Tools (use when appropriate): read_file, write_file, edit_file_lines, search_in_files, run_command, analyze_code, list_directory.
 
-**WHEN TO USE TOOLS:**
-- User asks to "create", "make", "generate" files → USE write_file (most common)
-- User asks to "read", "show", "display" file contents → USE read_file
-- User asks to "modify", "edit", "change" files → USE edit_file_lines or write_file
-- User mentions specific file paths → USE appropriate file tools
-- User wants code examples saved → USE write_file
+When to call tools:
+- create/make/generate/save → write_file
+- read/show/display → read_file
+- modify/edit/change → edit_file_lines or write_file
 
-**CRITICAL TOOL USAGE RULES:**
-1. **ALWAYS CALL TOOLS**: When user asks for file operations, you MUST call the appropriate tool function
-2. **Don't Just Describe**: Never just say "you should create a file" - actually call write_file()
-3. **write_file is Primary**: Use write_file() for most file creation/modification tasks
-4. **Prefer Complete Content**: Use write_file() with complete file content rather than partial operations
-
-**EXAMPLES OF CORRECT TOOL USAGE:**
-✅ User: "Create a Python script for LED blinking" → CALL write_file("led_blink.py", "python_code_here")
-✅ User: "Save this code to main.py" → CALL write_file("main.py", "code_content_here")  
-✅ User: "Update config.txt" → CALL write_file("config.txt", "updated_content_here")
-❌ WRONG: Just saying "Here's the code you can save to a file" without calling write_file()
-
-**FORMATTING RULES:**
-- Use proper markdown: **bold**, `inline code`, ## headers
-- Code blocks with language: ```python or ```bash
-- Links: [text](url) - only use URLs from context
-- Images: ![alt](Raw_URL) when available
-- Lists: - bullet points or 1. numbered
-- No fabricated information
-
-**RESPONSE STRUCTURE:**
-1. Direct answer first
-2. **CALL TOOLS** when appropriate for file operations (MANDATORY)
-3. Code examples when relevant  
-4. Links/references when helpful
-5. Keep responses clear and concise
-
-**SAFETY RULES:**
-- Never modify system files or critical configurations without explicit user consent
-- Validate file paths and permissions before editing
-- Provide clear explanations of what changes will be made
-- Ask for confirmation before making destructive changes'''
+Rules:
+1) Call tools for file ops, don't just describe.
+2) Prefer complete content in write_file.
+3) Validate paths and avoid destructive changes without consent.'''
         
         prompt = f"""
 {system_prompt}
