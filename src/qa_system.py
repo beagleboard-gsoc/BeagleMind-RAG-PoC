@@ -602,7 +602,7 @@ Context:
                 tools=tools,
                 tool_choice="auto",
                 temperature=eff_temp,
-                max_tokens=180,
+                max_tokens=120,
                 top_p=0.9,
                 timeout=45.0
             )
@@ -1030,7 +1030,7 @@ Answer:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=eff_temp,
-                max_tokens=180,
+                max_tokens=120,
                 top_p=0.9,
                 timeout=45.0
             )
@@ -1040,6 +1040,29 @@ Answer:
         except Exception as e:
             logger.error(f"Ollama response error: {e}")
             return f"Error getting response from Ollama: {str(e)}"
+
+    def warmup_ollama(self, model_name: str) -> bool:
+        """Warm up Ollama model to avoid first-call timeouts by loading weights."""
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key="ollama",
+                base_url="http://localhost:11434/v1",
+                timeout=20.0
+            )
+            # Tiny prompt with 1-2 tokens to trigger load
+            client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": "ok"}],
+                temperature=0.0,
+                max_tokens=1,
+                top_p=0.9,
+                timeout=20.0
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Ollama warmup failed (non-fatal): {e}")
+            return False
     
 
 
