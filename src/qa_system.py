@@ -99,8 +99,10 @@ class QASystem:
             Dictionary with the conversation and results
         """
         try:
+            # Determine how many results to fetch based on backend
+            max_results = 3 if llm_backend.lower() == "ollama" else 5
             # Get context from retrieval system first (reduced for efficiency)
-            search_results = self.search(question, n_results=5, rerank=True)
+            search_results = self.search(question, n_results=max_results, rerank=True)
             context_docs = []
             
             if search_results and search_results.get('documents') and search_results['documents'] and search_results['documents'][0]:
@@ -109,7 +111,7 @@ class QASystem:
                 metadatas = search_results.get('metadatas', [[]])[0]
                 distances = search_results.get('distances', [[]])[0]
                 
-                for i, doc_text in enumerate(documents[:5]):  # Take top 5 results
+                for i, doc_text in enumerate(documents[:max_results]):  # Limit per backend
                     metadata = metadatas[i] if i < len(metadatas) else {}
                     distance = distances[i] if i < len(distances) else 0.5
                     
@@ -649,13 +651,15 @@ Context:
     
     def _traditional_rag_response(self, question: str, search_strategy: str, n_results: int, include_context: bool, model_name: str, temperature: float, llm_backend: str) -> Dict[str, Any]:
         """Traditional RAG response for informational queries"""
+        # Limit results to 3 for Ollama, else use provided n_results
+        max_results = 3 if llm_backend.lower() == "ollama" else n_results
         search_results = self.search(
-            question, n_results=n_results, rerank=True
+            question, n_results=max_results, rerank=True
         )
         
         # If nothing found, retry with a broader search (no rerank)
         if not search_results or not search_results.get('documents') or not search_results['documents'][0]:
-            retry_results = self.search(question, n_results=n_results, rerank=False)
+            retry_results = self.search(question, n_results=max_results, rerank=False)
             if retry_results and retry_results.get('documents') and retry_results['documents'][0]:
                 search_results = retry_results
             else:
@@ -697,10 +701,10 @@ Context:
         distances = search_results.get('distances', [[]])[0]
         
         context_docs = []
-        for i, doc_text in enumerate(documents[:n_results]):
+        for i, doc_text in enumerate(documents[:max_results]):
             metadata = metadatas[i] if i < len(metadatas) else {}
             distance = distances[i] if i < len(distances) else 0.5
-            
+
             context_docs.append({
                 'text': doc_text,
                 'metadata': metadata,
