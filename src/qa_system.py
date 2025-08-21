@@ -575,7 +575,7 @@ Context:
         client = OpenAI(
             api_key="ollama",
             base_url="http://localhost:11434/v1",
-            timeout=30.0
+            timeout=180.0
         )
         
         tools = self.get_available_tools()
@@ -607,7 +607,7 @@ Context:
                 temperature=eff_temp,
                 max_tokens=120,
                 top_p=0.9,
-                timeout=45.0
+                timeout=180.0
             )
             
             message = completion.choices[0].message
@@ -1018,7 +1018,7 @@ Answer:
         client = OpenAI(
             api_key="ollama",
             base_url="http://localhost:11434/v1",
-            timeout=45.0
+            timeout=180.0
         )
         
         try:
@@ -1036,7 +1036,7 @@ Answer:
                 temperature=eff_temp,
                 max_tokens=120,
                 top_p=0.9,
-                timeout=45.0
+                timeout=180.0
             )
             
             return completion.choices[0].message.content or ""
@@ -1088,7 +1088,7 @@ Answer:
             client = OpenAI(
                 api_key="ollama",
                 base_url="http://localhost:11434/v1",
-                timeout=20.0
+                timeout=60.0
             )
             # Tiny prompt with 1-2 tokens to trigger load
             client.chat.completions.create(
@@ -1097,7 +1097,7 @@ Answer:
                 temperature=0.0,
                 max_tokens=1,
                 top_p=0.9,
-                timeout=20.0
+                timeout=60.0
             )
             return True
         except Exception as e:
