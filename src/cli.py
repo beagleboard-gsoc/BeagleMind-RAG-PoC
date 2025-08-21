@@ -81,7 +81,8 @@ class BeagleMindCLI:
             "collection_name": COLLECTION_NAME,
             "default_backend": "groq",
             "default_model": GROQ_MODELS[0],
-            "default_temperature": 0.3
+            "default_temperature": 0.3,
+            "default_use_tools": False
         }
         
         if os.path.exists(CLI_CONFIG_PATH):
@@ -282,7 +283,7 @@ class BeagleMindCLI:
     
     def interactive_chat(self, backend: str = None, model: str = None, 
                         temperature: float = None, search_strategy: str = "adaptive",
-                        show_sources: bool = False, use_tools: bool = True):
+                        show_sources: bool = False, use_tools: bool = False):
         """Start an interactive chat session with BeagleMind"""
         
         # Create QA system if not exists
@@ -480,16 +481,16 @@ def list_models(backend):
               default='adaptive', help='Search strategy to use')
 @click.option('--sources', is_flag=True, 
               help='Show source information with the response')
-@click.option('--no-tools', is_flag=True,
-              help='Disable tool usage - only provide text responses without file operations')
+@click.option('--tools/--no-tools', default=False,
+              help='Enable or disable tool usage (default: disabled)')
 @click.option('--interactive', '-i', is_flag=True,
               help='Force interactive chat session')
-def chat(prompt, backend, model, temperature, strategy, sources, no_tools, interactive):
+def chat(prompt, backend, model, temperature, strategy, sources, tools, interactive):
     """Chat with BeagleMind - Interactive mode by default, or single prompt with -p"""
     beaglemind = BeagleMindCLI()
     
-    # Convert no_tools flag to use_tools boolean
-    use_tools = not no_tools
+    # Convert tools flag to use_tools boolean (paired flag: --tools to enable)
+    use_tools = bool(tools)
     
     # Start interactive mode by default when no prompt is provided
     if not prompt:

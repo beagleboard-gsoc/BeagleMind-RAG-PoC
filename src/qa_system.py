@@ -58,15 +58,16 @@ class QASystem:
                     'metadatas': result.get('metadatas', []),
                     'distances': result.get('distances', []),
                     'total_found': result.get('total_found', 0),
-                    'filtered_results': result.get('filtered_results', 0)
+                    'filtered_results': result.get('filtered_results', 0),
+                    'retrieval_ok': True
                 }
             else:
                 logger.error(f"Search API failed: {response.status_code} - {response.text}")
-                return {'documents': [], 'metadatas': [], 'distances': []}
+                return {'documents': [], 'metadatas': [], 'distances': [], 'retrieval_ok': False}
                 
         except Exception as e:
             logger.error(f"Error during search: {e}")
-            return {'documents': [], 'metadatas': [], 'distances': []}
+            return {'documents': [], 'metadatas': [], 'distances': [], 'retrieval_ok': False, 'error': str(e)}
     
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Return the OpenAI function definitions for all available tools"""
@@ -664,6 +665,12 @@ Context:
                 search_results = retry_results
             else:
                 # Graceful fallback: answer without context
+                retrieval_note = ""
+                if retry_results and retry_results.get('retrieval_ok') is False:
+                    retrieval_note = "Note: retrieval system not configured or unreachable. "
+                elif search_results and search_results.get('retrieval_ok') is False:
+                    retrieval_note = "Note: retrieval system not configured or unreachable. "
+
                 fallback_prompt = (
                     "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
                     "No repository context is available for this question. Provide a practical, step-by-step answer "
@@ -671,20 +678,15 @@ Context:
                     f"Question: {question}\n\nAnswer:"
                 )
                 try:
-                    if llm_backend.lower() == "groq":
-                        answer = self._get_groq_response(fallback_prompt, model_name, temperature)
-                    elif llm_backend.lower() == "openai":
-                        answer = self._get_openai_response(fallback_prompt, model_name, temperature)
-                    elif llm_backend.lower() == "ollama":
-                        answer = self._get_ollama_response(fallback_prompt, model_name, temperature)
-                    else:
-                        raise ValueError(f"Unsupported LLM backend: {llm_backend}")
+                    answer, used_backend = self._call_llm_with_fallback(fallback_prompt, llm_backend, model_name, temperature)
+                    if used_backend is None:
+                        raise RuntimeError(answer)
                 except Exception as e:
                     logger.error(f"LLM fallback failed: {e}")
                     answer = "I couldn't generate an answer right now. Please try again."
                 
                 return {
-                    "answer": answer,
+                    "answer": (retrieval_note + answer) if retrieval_note else answer,
                     "sources": [],
                     "search_info": {
                         "strategy": search_strategy,
@@ -737,8 +739,12 @@ Context:
                 logger.error(f"LLM fallback failed: {e}")
                 answer = "I couldn't generate an answer right now. Please try again."
             
+            retrieval_note = ""
+            if search_results and search_results.get('retrieval_ok') is False:
+                retrieval_note = "Note: retrieval system not configured or unreachable. "
+
             return {
-                "answer": answer,
+                "answer": (retrieval_note + answer) if retrieval_note else answer,
                 "sources": [],
                 "search_info": {
                     "strategy": search_strategy,
@@ -754,15 +760,9 @@ Context:
         
         # Get answer from LLM using selected backend
         try:
-            if llm_backend.lower() == "groq":
-                answer = self._get_groq_response(prompt, model_name, temperature)
-            elif llm_backend.lower() == "openai":
-                answer = self._get_openai_response(prompt, model_name, temperature)
-            elif llm_backend.lower() == "ollama":
-                answer = self._get_ollama_response(prompt, model_name, temperature)
-            else:
-                raise ValueError(f"Unsupported LLM backend: {llm_backend}")
-            
+            answer, used_backend = self._call_llm_with_fallback(prompt, llm_backend, model_name, temperature)
+            if used_backend is None:
+                raise RuntimeError(answer)
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
@@ -1044,6 +1044,42 @@ Answer:
         except Exception as e:
             logger.error(f"Ollama response error: {e}")
             return f"Error getting response from Ollama: {str(e)}"
+
+    def _call_llm_with_fallback(self, prompt: str, preferred_backend: str, model_name: str, temperature: float) -> tuple:
+        """Attempt preferred backend, then fall back to other backends if errors occur.
+
+        Returns (answer_str, used_backend)
+        """
+        backends_try = [preferred_backend.lower()]
+        for b in ['ollama', 'openai', 'groq']:
+            if b not in backends_try:
+                backends_try.append(b)
+
+        last_err = None
+        for backend in backends_try:
+            try:
+                if backend == 'groq':
+                    ans = self._get_groq_response(prompt, model_name, temperature)
+                elif backend == 'openai':
+                    ans = self._get_openai_response(prompt, model_name, temperature)
+                elif backend == 'ollama':
+                    ans = self._get_ollama_response(prompt, model_name, temperature)
+                else:
+                    continue
+
+                # Treat explicit error-prefixed responses as failure to try next
+                if isinstance(ans, str) and ans.startswith('Error getting response from'):
+                    last_err = ans
+                    continue
+
+                return ans, backend
+            except Exception as e:
+                last_err = str(e)
+                logger.warning(f"Backend {backend} failed, trying next: {e}")
+                continue
+
+        # All backends failed
+        return (last_err or "No LLM backend available"), None
 
     def warmup_ollama(self, model_name: str) -> bool:
         """Warm up Ollama model to avoid first-call timeouts by loading weights."""
