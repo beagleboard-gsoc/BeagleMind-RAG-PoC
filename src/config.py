@@ -26,4 +26,4 @@ RERANK_TOP_K = 5
 # Collection Configuration
 COLLECTION_NAME = "beaglemind_col"
 
-RAG_BACKEND_URL = os.getenv('RAG_BACKEND_URL', 'http://localhost:8000/api')
+RAG_BACKEND_URL = os.getenv('RAG_BACKEND_URL', 'https://mind-api.beagleboard.org/api')
