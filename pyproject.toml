@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beaglemind-cli"
-version = "1.0.1"
+version = "1.0.2"
 description = "Intelligent documentation assistant CLI for Beagleboard projects"
 authors = [
     {name = "Fayez Zouari", email = "fayez.zouari@insat.ucar.tn"}
