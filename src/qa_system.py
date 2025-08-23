@@ -665,8 +665,14 @@ Context:
                     logger.error(f"LLM fallback failed: {e}")
                     answer = "I couldn't generate an answer right now. Please try again."
                 
+                # Ensure the answer is substantive (adds steps/code if needed)
+                base = (
+                    "Provide a practical, step-by-step solution with a small working code example appropriate for BeagleBoard/BeagleY-AI."
+                )
+                improved = self._ensure_substantive_answer(answer, base, llm_backend, model_name, temperature)
+                final_answer = (retrieval_note + improved) if retrieval_note else improved
                 return {
-                    "answer": (retrieval_note + answer) if retrieval_note else answer,
+                    "answer": final_answer,
                     "sources": [],
                     "search_info": {
                         "strategy": search_strategy,
@@ -746,6 +752,12 @@ Context:
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
+        
+        # Ensure the answer is substantive
+        base = (
+            "Provide a practical, step-by-step solution with a small working code example appropriate for BeagleBoard/BeagleY-AI."
+        )
+        answer = self._ensure_substantive_answer(answer, base, llm_backend, model_name, temperature)
         
         # Prepare source information
         sources = []
@@ -1051,28 +1063,28 @@ Answer:
         # All backends failed
         return (last_err or "No LLM backend available"), None
 
-    def warmup_ollama(self, model_name: str) -> bool:
-        """Warm up Ollama model to avoid first-call timeouts by loading weights."""
+    def _ensure_substantive_answer(self, answer: str, force_prompt_base: str, llm_backend: str, model_name: str, temperature: float) -> str:
+        """If the answer looks trivial/meta, retry once with a stricter directive to produce steps/code."""
         try:
-            from openai import OpenAI
-            client = OpenAI(
-                api_key="ollama",
-                base_url="http://localhost:11434/v1",
-                timeout=60.0
-            )
-            # Tiny prompt with 1-2 tokens to trigger load
-            client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": "ok"}],
-                temperature=0.0,
-                max_tokens=1,
-                top_p=0.9,
-                timeout=60.0
-            )
-            return True
-        except Exception as e:
-            logger.warning(f"Ollama warmup failed (non-fatal): {e}")
-            return False
+            text = (answer or "").strip().lower()
+            too_short = len(answer or "") < 120
+            meta_like = any(p in text for p in [
+                "i will provide", "i will show", "i understand", "i will explain", "let's", "we will"
+            ])
+            missing_structure = ("```" not in (answer or "")) and ("- " not in (answer or "")) and ("1." not in (answer or ""))
+            if too_short or (meta_like and missing_structure):
+                force_prompt = (
+                    f"{force_prompt_base}\n\n"
+                    "Now provide the complete answer directly with: \n"
+                    "1) Clear numbered steps\n2) A concise working code example\n"
+                    "Do not preface with explanations like 'I will' or 'I understand'."
+                )
+                retry_ans, used_backend = self._call_llm_with_fallback(force_prompt, llm_backend, model_name, temperature)
+                if used_backend is not None and isinstance(retry_ans, str) and len(retry_ans.strip()) > len((answer or '').strip()):
+                    return retry_ans
+        except Exception:
+            pass
+        return answer
     
 
 

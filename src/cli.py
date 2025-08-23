@@ -495,13 +495,6 @@ def chat(prompt, backend, model, temperature, strategy, sources, tools, interact
     # Start interactive mode by default when no prompt is provided
     if not prompt:
         console.print("[dim]Starting interactive chat mode. Use -p 'your question' for single prompt mode.[/dim]\n")
-        # Warm up Ollama model if selected
-        if (backend or beaglemind.config.get("default_backend")) == "ollama":
-            try:
-                qa = beaglemind.get_qa_system()
-                qa.warmup_ollama(model or beaglemind.config.get("default_model", "qwen3:1.7b"))
-            except Exception:
-                pass
         beaglemind.interactive_chat(
             backend=backend,
             model=model,
@@ -512,13 +505,6 @@ def chat(prompt, backend, model, temperature, strategy, sources, tools, interact
         )
     else:
         # Single prompt mode when --prompt is provided
-        # Warm up Ollama model if selected
-        if (backend or beaglemind.config.get("default_backend")) == "ollama":
-            try:
-                qa = beaglemind.get_qa_system()
-                qa.warmup_ollama(model or beaglemind.config.get("default_model", "qwen3:1.7b"))
-            except Exception:
-                pass
         beaglemind.chat(
             prompt=prompt,
             backend=backend,
