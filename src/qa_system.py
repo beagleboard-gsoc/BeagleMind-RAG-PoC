@@ -665,12 +665,8 @@ Context:
                     logger.error(f"LLM fallback failed: {e}")
                     answer = "I couldn't generate an answer right now. Please try again."
                 
-                # Ensure the answer is substantive (adds steps/code if needed)
-                base = (
-                    "Provide a practical, step-by-step solution with a small working code example appropriate for BeagleBoard/BeagleY-AI."
-                )
-                improved = self._ensure_substantive_answer(answer, base, llm_backend, model_name, temperature)
-                final_answer = (retrieval_note + improved) if retrieval_note else improved
+                # Return the raw answer (no additional enforcement)
+                final_answer = (retrieval_note + answer) if retrieval_note else answer
                 return {
                     "answer": final_answer,
                     "sources": [],
@@ -753,11 +749,7 @@ Context:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
         
-        # Ensure the answer is substantive
-        base = (
-            "Provide a practical, step-by-step solution with a small working code example appropriate for BeagleBoard/BeagleY-AI."
-        )
-        answer = self._ensure_substantive_answer(answer, base, llm_backend, model_name, temperature)
+    # Return the answer as-is (no substantive enforcement)
         
         # Prepare source information
         sources = []
@@ -1063,28 +1055,7 @@ Answer:
         # All backends failed
         return (last_err or "No LLM backend available"), None
 
-    def _ensure_substantive_answer(self, answer: str, force_prompt_base: str, llm_backend: str, model_name: str, temperature: float) -> str:
-        """If the answer looks trivial/meta, retry once with a stricter directive to produce steps/code."""
-        try:
-            text = (answer or "").strip().lower()
-            too_short = len(answer or "") < 120
-            meta_like = any(p in text for p in [
-                "i will provide", "i will show", "i understand", "i will explain", "let's", "we will"
-            ])
-            missing_structure = ("```" not in (answer or "")) and ("- " not in (answer or "")) and ("1." not in (answer or ""))
-            if too_short or (meta_like and missing_structure):
-                force_prompt = (
-                    f"{force_prompt_base}\n\n"
-                    "Now provide the complete answer directly with: \n"
-                    "1) Clear numbered steps\n2) A concise working code example\n"
-                    "Do not preface with explanations like 'I will' or 'I understand'."
-                )
-                retry_ans, used_backend = self._call_llm_with_fallback(force_prompt, llm_backend, model_name, temperature)
-                if used_backend is not None and isinstance(retry_ans, str) and len(retry_ans.strip()) > len((answer or '').strip()):
-                    return retry_ans
-        except Exception:
-            pass
-        return answer
+    # Removed substantive-answer guard per user request
     
 
 
