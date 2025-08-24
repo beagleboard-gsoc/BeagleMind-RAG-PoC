@@ -5,6 +5,7 @@ import logging
 import sys
 import os
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import click
@@ -60,6 +61,53 @@ OLLAMA_MODELS = [
 
 LLM_BACKENDS = ["groq", "openai", "ollama"]
 
+# === Output cleaning to remove meta-thinking / chain-of-thought ===
+def clean_llm_response_text(response: str) -> str:
+    """Remove chain-of-thought style content and leave the final answer.
+
+    Heuristics:
+    - Strip <think>/<thinking> blocks if present
+    - Drop leading paragraphs that look like internal planning ("I should...", "Let's...", etc.)
+    """
+    if not response:
+        return response
+    try:
+        # Remove explicit thought tags
+        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+
+        # Split into paragraphs and filter obvious meta-thought before first real paragraph
+        paras = re.split(r'\n{2,}', cleaned.strip())
+        meta_patterns = [
+            r"\bI (should|need to|will|am going to|must)\b",
+            r"\bLet's\b",
+            r"\bPlan:?\b",
+            r"\bReasoning:?\b",
+            r"\bThinking:?\b",
+            r"\bTime to\b",
+            r"\bAlright\b",
+            r"\bI'll\b",
+            r"\bI need to make sure\b",
+        ]
+        meta_re = re.compile("|".join(meta_patterns), re.IGNORECASE)
+        filtered = []
+        non_meta_seen = False
+        for p in paras:
+            if not non_meta_seen and meta_re.search(p):
+                # skip meta planning paragraphs at the start
+                continue
+            p2 = re.sub(r'^(?:Note:|Meta:).*$', '', p, flags=re.IGNORECASE | re.MULTILINE).strip()
+            if p2:
+                filtered.append(p2)
+                non_meta_seen = True
+        cleaned = "\n\n".join(filtered) if filtered else cleaned.strip()
+
+        # Normalize whitespace
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+        return cleaned
+    except Exception:
+        return response
+
 # ASCII Art Banner for BeagleMind
 BEAGLEMIND_BANNER = """
 ██████╗ ███████╗ █████╗  ██████╗ ██╗     ███████╗███╗   ███╗██╗███╗   ██╗██████╗ 
@@ -114,6 +162,11 @@ class BeagleMindCLI:
         if not self.qa_system:
             collection_name = self.config.get("collection_name", COLLECTION_NAME)
             self.qa_system = QASystem(collection_name=collection_name)
+            # Initialize a fresh in-RAM conversation for this CLI session
+            try:
+                self.qa_system.start_conversation()
+            except Exception:
+                pass
         return self.qa_system
     
     def list_models(self, backend: str = None):
@@ -226,6 +279,8 @@ class BeagleMindCLI:
                 console.print(f"[bold cyan]🤖 BeagleMind Response:[/bold cyan]\n")
                 
                 answer = result.get('answer', 'No response generated')
+                # Remove meta-thinking if any leaked
+                answer = clean_llm_response_text(answer)
                 if answer:
                     # Render markdown for better formatting
                     console.print(Markdown(answer))
@@ -283,10 +338,14 @@ class BeagleMindCLI:
     
     def interactive_chat(self, backend: str = None, model: str = None, 
                         temperature: float = None, search_strategy: str = "adaptive",
-                        show_sources: bool = False, use_tools: bool = False):
+                        show_sources: bool = False, use_tools: bool = False, collection: str = None):
         """Start an interactive chat session with BeagleMind"""
         
         # Create QA system if not exists
+        if collection:
+            # Recreate QA system with the requested collection
+            self.config["collection_name"] = collection
+            self.qa_system = None
         if not self.qa_system:
             self.qa_system = self.get_qa_system()
         
@@ -376,6 +435,11 @@ class BeagleMindCLI:
                         os.system('clear' if os.name == 'posix' else 'cls')
                         console.print(f"[bold cyan]{BEAGLEMIND_BANNER}[/bold cyan]")
                         console.print("[bold]Interactive Chat Mode - Session Cleared[/bold]\n")
+                        try:
+                            # Reset in-RAM conversation history
+                            self.qa_system.reset_conversation()
+                        except Exception:
+                            pass
                         continue
                     
                     # Process regular chat input
@@ -481,17 +545,22 @@ def list_models(backend):
               default='adaptive', help='Search strategy to use')
 @click.option('--sources', is_flag=True, 
               help='Show source information with the response')
-@click.option('--tools/--no-tools', default=False,
-              help='Enable or disable tool usage (default: disabled)')
+@click.option('--tools/--no-tools', default=True,
+              help='Enable or disable tool usage (default: enabled)')
 @click.option('--interactive', '-i', is_flag=True,
               help='Force interactive chat session')
-def chat(prompt, backend, model, temperature, strategy, sources, tools, interactive):
+@click.option('--collection', '-c', help='Override the collection name for retrieval (default from config)')
+def chat(prompt, backend, model, temperature, strategy, sources, tools, interactive, collection):
     """Chat with BeagleMind - Interactive mode by default, or single prompt with -p"""
     beaglemind = BeagleMindCLI()
+    if collection:
+        # Apply collection override before creating QA system
+        beaglemind.config["collection_name"] = collection
+        beaglemind.qa_system = None
     
     # Convert tools flag to use_tools boolean (paired flag: --tools to enable)
     use_tools = bool(tools)
-    
+    collection="beagleboard"
     # Start interactive mode by default when no prompt is provided
     if not prompt:
         console.print("[dim]Starting interactive chat mode. Use -p 'your question' for single prompt mode.[/dim]\n")
@@ -501,7 +570,8 @@ def chat(prompt, backend, model, temperature, strategy, sources, tools, interact
             temperature=temperature,
             search_strategy=strategy,
             show_sources=sources,
-            use_tools=use_tools
+            use_tools=use_tools,
+            collection=collection
         )
     else:
         # Single prompt mode when --prompt is provided

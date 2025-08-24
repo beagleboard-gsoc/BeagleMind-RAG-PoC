@@ -288,11 +288,18 @@ class GradioRAGApp:
             return "", history, "Please enter a question.", ""
         
         try:
+            # Begin a new conversation if history is empty (RAM-based)
+            if not history:
+                try:
+                    self.qa_system.start_conversation()
+                except Exception:
+                    pass
+
             # Get answer from QA system with selected strategy and backend
             result = self.qa_system.ask_question(
-                message, 
-                search_strategy=search_strategy, 
-                model_name=model_name, 
+                message,
+                search_strategy=search_strategy,
+                model_name=model_name,
                 temperature=temperature,
                 llm_backend=llm_backend
             )
@@ -329,20 +336,14 @@ class GradioRAGApp:
             error_message = f"Error: {str(e)}"
             history.append((message, error_message))
             return "", history, "Error occurred while processing your question.", ""
-    
-    def get_models_for_backend(self, backend: str) -> list:
-        """Get available models for the selected backend"""
-        if backend.lower() == "groq":
-            return GROQ_MODELS
-        elif backend.lower() == "openai":
-            return OPENAI_MODELS
-        elif backend.lower() == "ollama":
-            return OLLAMA_MODELS
-        else:
-            return GROQ_MODELS  # Default fallback
-    
+
     def clear_chat(self):
         """Clear chat history and sources"""
+        try:
+            # Reset in-RAM conversation history in QASystem as well
+            self.qa_system.reset_conversation()
+        except Exception:
+            pass
         return [], "Chat cleared. Ask me anything!"
     
     def generate_code_file(self, query: str, file_type: str, model_name: str, temperature: float, llm_backend: str) -> Tuple[str, str, str]:

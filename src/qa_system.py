@@ -24,7 +24,15 @@ class QASystem:
             backend_url = RAG_BACKEND_URL 
         
         self.backend_url = backend_url
-        self.collection_name = collection_name or COLLECTION_NAME
+        # Enforce beagleboard collection by default; allow explicit override if provided
+        self.collection_name = collection_name or COLLECTION_NAME or 'beagleboard'
+        # In-memory conversation history (RAM-only)
+        self.conversation_history: List[Dict[str, str]] = []  # [{role: 'user'|'assistant', content: str}]
+        # Cap how many prior turns to include when sending prompts
+        try:
+            self.history_max_messages = int(os.getenv('MAX_HISTORY_MESSAGES', '20'))
+        except Exception:
+            self.history_max_messages = 20
         
         # Question type detection patterns
         self.question_patterns = {
@@ -36,20 +44,46 @@ class QASystem:
             'recent': [r'\blatest\b', r'\brecent\b', r'\bnew\b', r'\bupdated\b', r'\bcurrent\b']
         }
 
-    def search(self, query: str, n_results: int = 5, rerank: bool = True) -> Dict[str, Any]:
+    # ==== Conversation memory utilities ====
+    def start_conversation(self):
+        """Begin a new chat session (clears in-RAM history)."""
+        self.conversation_history = []
+
+    def reset_conversation(self):
+        """Alias to start a new session by clearing history."""
+        self.start_conversation()
+
+    def _get_history_messages(self) -> List[Dict[str, str]]:
+        """Return prior conversation turns as chat messages (capped)."""
+        if not self.conversation_history:
+            return []
+        # Only keep the last N messages
+        hist = self.conversation_history[-self.history_max_messages:]
+        # Ensure structure matches OpenAI chat format
+        return [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in hist if m.get("content")]
+
+    def _record_user(self, content: str):
+        if content:
+            self.conversation_history.append({"role": "user", "content": str(content)})
+
+    def _record_assistant(self, content: str):
+        if content is None:
+            content = ""
+        self.conversation_history.append({"role": "assistant", "content": str(content)})
+
+    def search(self, query: str, n_results: int = 5, rerank: bool = True, collection_name: Optional[str] = None) -> Dict[str, Any]:
         """Search documents using the backend API"""
         try:
-            response = requests.post(
-                f"{self.backend_url}/retrieve",
-                json={
-                    "query": query,
-                    "collection_name": self.collection_name,
-                    "n_results": n_results,
-                    "include_metadata": True,
-                    "rerank": rerank
-                },
-                timeout=30
-            )
+            timeout_sec = float(os.getenv('RAG_TIMEOUT_SECONDS', '30'))
+            url = f"{self.backend_url}/retrieve"
+            payload = {
+                "query": query,
+                "collection_name": collection_name or self.collection_name,
+                "n_results": n_results,
+                "include_metadata": True,
+                "rerank": rerank
+            }
+            response = requests.post(url, json=payload, timeout=timeout_sec)
             
             if response.status_code == 200:
                 result = response.json()
@@ -63,7 +97,13 @@ class QASystem:
                 }
             else:
                 logger.error(f"Search API failed: {response.status_code} - {response.text}")
-                return {'documents': [], 'metadatas': [], 'distances': [], 'retrieval_ok': False}
+                return {
+                    'documents': [],
+                    'metadatas': [],
+                    'distances': [],
+                    'retrieval_ok': False,
+                    'error': f"HTTP {response.status_code}: {response.text[:300]}"
+                }
                 
         except Exception as e:
             logger.error(f"Error during search: {e}")
@@ -72,6 +112,53 @@ class QASystem:
     def get_available_tools(self) -> List[Dict[str, Any]]:
         """Return the OpenAI function definitions for all available tools"""
         return tool_registry.get_all_tool_definitions()
+
+    def _retrieve_tool_def(self) -> Dict[str, Any]:
+        """Provide a virtual tool for retrieval that LLMs can call when needed (non-Ollama backends)."""
+        return {
+            "type": "function",
+            "function": {
+                "name": "retrieve_context",
+                "description": "Retrieve relevant BeagleBoard documents for a user query.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The user question to search for."},
+                        "n_results": {"type": "integer", "description": "How many results to return", "default": 5},
+                        "rerank": {"type": "boolean", "description": "Whether to rerank results", "default": True},
+                        "collection_name": {"type": "string", "description": "Collection name to search (defaults to config)"}
+                    },
+                    "required": ["query"]
+                }
+            }
+        }
+
+    def _should_retrieve(self, question: str, backend: str, use_tools: bool) -> bool:
+        """Heuristic for deciding retrieval when not using tool-driven chat.
+
+        - Ollama: always True
+        - Others: True if question references BeagleBoard/docs or matches technical patterns; False for greetings/irrelevant.
+        """
+        if (backend or '').lower() == 'ollama':
+            return True
+        if not question:
+            return False
+        q = question.lower()
+        # Beagleboard hints
+        if any(tok in q for tok in ["beagle", "beaglebone", "beagleboard", "beagley-ai", "beagley ai", "bbb"]):
+            return True
+        # Technical patterns
+        for pats in self.question_patterns.values():
+            for p in pats:
+                try:
+                    if re.search(p, q):
+                        return True
+                except Exception:
+                    continue
+        # Greetings/irrelevant
+        if any(g in q for g in ["hello", "hi", "hey", "what's up", "how are you", "good morning", "good evening"]):
+            return False
+        return False
     
     def execute_tool(self, function_name: str, function_args: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool function by name with given arguments"""
@@ -85,7 +172,7 @@ class QASystem:
         except Exception as e:
             return {"success": False, "error": f"Tool execution error: {str(e)}"}
     
-    def chat_with_tools(self, question: str, llm_backend: str = "groq", model_name: str = "meta-llama/llama-3.1-70b-versatile", max_iterations: int = 5, temperature: float = 0.3, auto_approve: bool = False) -> Dict[str, Any]:
+    def chat_with_tools(self, question: str, llm_backend: str = "groq", model_name: str = "meta-llama/llama-3.1-70b-versatile", max_iterations: int = 5, temperature: float = 0.3, auto_approve: bool = False, use_tools: bool = True) -> Dict[str, Any]:
         """
         Enhanced chat with tools integration for BeagleMind RAG system.
         
@@ -100,11 +187,11 @@ class QASystem:
             Dictionary with the conversation and results
         """
         try:
-            # Determine how many results to fetch based on backend
+            # Determine how many results to fetch based on backend (keep small for Ollama)
             max_results = 3 if llm_backend.lower() == "ollama" else 5
-            # Get context from retrieval system first (reduced for efficiency)
-            search_results = self.search(question, n_results=max_results, rerank=True)
+            # Retrieval is the only source of context: do a single retrieval for all backends
             context_docs = []
+            search_results = self.search(question, n_results=max_results, rerank=True)
             
             if search_results and search_results.get('documents') and search_results['documents'] and search_results['documents'][0]:
                 # Process documents directly since reranking is done by the API
@@ -127,7 +214,7 @@ class QASystem:
                         }
                     })
             
-            # Build context string
+            # Build context string from retrieval (only source of context)
             context_parts = []
             for i, doc in enumerate(context_docs, 1):
                 try:
@@ -157,11 +244,23 @@ class QASystem:
             machine_info = tool_registry.get_machine_info()
             
             # Create concise system prompt with essential rules and context
+            # Guidance differs per backend
+            if llm_backend.lower() == "ollama":
+                retrieval_guidance = "Context is pre-retrieved and appended below. Use it to answer."
+                extra_tool_note = ""
+            else:
+                retrieval_guidance = (
+                    "If the user's question is about BeagleBoard docs or has a technical aspect, call the tool 'retrieve_context' with the query to fetch references; "
+                    "otherwise, answer directly without retrieval."
+                )
+                extra_tool_note = "\nAvailable extra tool: retrieve_context(query, n_results=5, rerank=true, collection_name='beagleboard')."
+
             system_prompt = f"""You are BeagleMind, a concise, reliable assistant for Beagleboard docs and code.
 
-Tools (call when needed): read_file, write_file, edit_file_lines, search_in_files, run_command, analyze_code, show_directory_tree.
+Tools (call when needed): read_file, write_file, edit_file_lines, search_in_files, run_command, analyze_code, show_directory_tree.{extra_tool_note}
 
 Rules:
+- {retrieval_guidance}
 - Use tools to read/write/modify files or run commands; don't just describe.
 - Working dir: {machine_info['current_working_directory']} (base: {machine_info['base_directory']}). Prefer relative paths and confirm created paths.
 - Keep answers brief, actionable, and grounded in context.
@@ -170,20 +269,29 @@ Context:
 {context}
 """
 
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": str(question) if question else "Hello, I need help with BeagleBoard development."}
-            ]
+            # Build messages with prior history in RAM
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(self._get_history_messages())
+            messages.append({
+                "role": "user",
+                "content": str(question) if question else "Hello, I need help with BeagleBoard development."
+            })
             
             conversation = []
             tool_results = []
             
+            # Build tool list only for Groq/OpenAI; Ollama must not have tool calling
+            tools = None
+            if llm_backend.lower() in ("groq", "openai"):
+                base_tools = self.get_available_tools() if use_tools else []
+                tools = base_tools + [self._retrieve_tool_def()]
+
             for iteration in range(max_iterations):
                 # Get response using the specified backend
                 if llm_backend.lower() == "groq":
-                    response_content, tool_calls = self._chat_with_groq(messages, model_name, temperature)
+                    response_content, tool_calls = self._chat_with_groq(messages, model_name, temperature, tools)
                 elif llm_backend.lower() == "openai":
-                    response_content, tool_calls = self._chat_with_openai(messages, model_name, temperature)
+                    response_content, tool_calls = self._chat_with_openai(messages, model_name, temperature, tools)
                 elif llm_backend.lower() == "ollama":
                     response_content, tool_calls = self._chat_with_ollama(messages, model_name, temperature)
                 else:
@@ -303,6 +411,56 @@ Context:
                             logger.error(f"Unexpected error parsing arguments: {e}")
                             function_args = {}
                         
+                        # Intercept virtual retrieval tool
+                        if function_name == "retrieve_context":
+                            q = function_args.get("query") or question
+                            # normalize n_results
+                            n_val = function_args.get("n_results", 5)
+                            try:
+                                n = int(n_val)
+                            except Exception:
+                                n = 5
+                            # normalize rerank booleans (accept strings)
+                            rr_val = function_args.get("rerank", True)
+                            if isinstance(rr_val, str):
+                                rr = rr_val.strip().lower() in ("1", "true", "yes", "y")
+                            else:
+                                rr = bool(rr_val)
+                            # optional collection override (prefer correct key 'collection_name', fallback to 'collection')
+                            collection_override = function_args.get("collection_name") or function_args.get("collection")
+                            tool_result = self.search(q, n_results=n, rerank=rr, collection_name=collection_override)
+                            # Add to messages so model can read results
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.get("id", f"call_{len(messages)}"),
+                                "content": json.dumps(tool_result)
+                            })
+                            tool_results.append({
+                                "tool": function_name,
+                                "arguments": {"query": q, "n_results": n, "rerank": rr},
+                                "result": tool_result,
+                                "requires_permission": False,
+                                "user_approved": None
+                            })
+                            # Also collect as sources for final rendering if present
+                            if tool_result and tool_result.get('documents') and tool_result['documents'] and tool_result['documents'][0]:
+                                docs = tool_result['documents'][0]
+                                metas = tool_result.get('metadatas', [[]])[0]
+                                for i, doc_text in enumerate(docs[:5]):
+                                    md = metas[i] if i < len(metas) else {}
+                                    context_docs.append({
+                                        'text': doc_text,
+                                        'metadata': md,
+                                        'file_info': {
+                                            'name': md.get('file_name', 'Unknown'),
+                                            'path': md.get('file_path', ''),
+                                            'type': md.get('file_type', 'unknown'),
+                                            'language': md.get('language', 'unknown')
+                                        }
+                                    })
+                            # Continue loop to let model produce a final answer
+                            continue
+
                         # Check if this is a file operation that requires permission
                         requires_permission = function_name in ["write_file", "edit_file_lines"]
                         user_approved = auto_approve
@@ -463,6 +621,13 @@ Context:
                     })
                     continue
             
+            # Record this turn in memory (user + assistant)
+            try:
+                self._record_user(question)
+                self._record_assistant(conversation[-1]["content"] if conversation else "")
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "answer": conversation[-1]["content"] if conversation else "No response generated",
@@ -485,7 +650,7 @@ Context:
                 "answer": f"I encountered an error while processing your request. Please try again. Error: {str(e)}"
             }
 
-    def _chat_with_openai(self, messages: List[Dict], model_name: str, temperature: float) -> tuple:
+    def _chat_with_openai(self, messages: List[Dict], model_name: str, temperature: float, tools: Optional[List[Dict]] = None) -> tuple:
         """Handle chat with OpenAI backend"""
         from openai import OpenAI
         
@@ -494,7 +659,7 @@ Context:
             timeout=30.0
         )
         
-        tools = self.get_available_tools()
+        tools = tools or self.get_available_tools()
         
         try:
             completion = client.chat.completions.create(
@@ -526,7 +691,7 @@ Context:
             logger.error(f"OpenAI chat error: {e}")
             return f"Error communicating with OpenAI: {str(e)}", []
 
-    def _chat_with_groq(self, messages: List[Dict], model_name: str, temperature: float) -> tuple:
+    def _chat_with_groq(self, messages: List[Dict], model_name: str, temperature: float, tools: Optional[List[Dict]] = None) -> tuple:
         """Handle chat with Groq backend"""
         from openai import OpenAI
         
@@ -536,7 +701,7 @@ Context:
             timeout=30.0
         )
         
-        tools = self.get_available_tools()
+        tools = tools or self.get_available_tools()
         
         try:
             completion = client.chat.completions.create(
@@ -568,7 +733,7 @@ Context:
             logger.error(f"Groq chat error: {e}")
             return f"Error communicating with Groq: {str(e)}", []
 
-    def _chat_with_ollama(self, messages: List[Dict], model_name: str, temperature: float) -> tuple:
+    def _chat_with_ollama(self, messages: List[Dict], model_name: str, temperature: float, tools: Optional[List[Dict]] = None) -> tuple:
         """Handle chat with Ollama backend"""
         from openai import OpenAI
         
@@ -577,15 +742,11 @@ Context:
             base_url="http://localhost:11434/v1",
             timeout=360.0
         )
-        
-        tools = self.get_available_tools()
-        
+        # Per policy, Ollama MUST NOT have access to tool calling. Do not pass tools.
         try:
             completion = client.chat.completions.create(
                 model=model_name,
                 messages=messages,
-                tools=tools,
-                tool_choice="auto",
                 temperature=temperature,
                 timeout=360.0
             )
@@ -614,8 +775,7 @@ Context:
                     n_results: int = 5, include_context: bool = False, model_name: str = "meta-llama/llama-3.1-70b-versatile", 
                     temperature: float = 0.3, llm_backend: str = "groq", use_tools: bool = True, auto_approve: bool = False) -> Dict[str, Any]:
         """Enhanced question answering with adaptive search strategies and smart tool integration"""
-        
-        # Use chat_with_tools for interactive requests or when explicitly requested
+        # Use chat_with_tools by default; Ollama will still have no tool access internally
         if use_tools:
             logger.info(f"Using chat_with_tools for interactive question: {question[:50]}...")
             return self.chat_with_tools(
@@ -623,7 +783,8 @@ Context:
                 llm_backend=llm_backend, 
                 model_name=model_name, 
                 temperature=temperature,
-                auto_approve=auto_approve
+                auto_approve=auto_approve,
+                use_tools=(llm_backend.lower() in ("groq", "openai"))
             )
         
         # Fallback to traditional RAG approach for simple informational questions
@@ -632,63 +793,65 @@ Context:
     
     def _traditional_rag_response(self, question: str, search_strategy: str, n_results: int, include_context: bool, model_name: str, temperature: float, llm_backend: str) -> Dict[str, Any]:
         """Traditional RAG response for informational queries"""
-        # Limit results to 3 for Ollama, else use provided n_results
         max_results = 3 if llm_backend.lower() == "ollama" else n_results
-        search_results = self.search(
-            question, n_results=max_results, rerank=True
-        )
-        
-        # If nothing found, retry with a broader search (no rerank)
-        if not search_results or not search_results.get('documents') or not search_results['documents'][0]:
-            retry_results = self.search(question, n_results=max_results, rerank=False)
-            if retry_results and retry_results.get('documents') and retry_results['documents'][0]:
-                search_results = retry_results
-            else:
-                # Graceful fallback: answer without context
-                retrieval_note = ""
-                if retry_results and retry_results.get('retrieval_ok') is False:
-                    retrieval_note = "Note: retrieval system not configured or unreachable. "
-                elif search_results and search_results.get('retrieval_ok') is False:
-                    retrieval_note = "Note: retrieval system not configured or unreachable. "
 
-                fallback_prompt = (
-                    "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
-                    "No repository context is available for this question. Provide a practical, step-by-step answer "
-                    "with a small code example when helpful. Keep it accurate and concise.\n\n"
-                    f"Question: {question}\n\nAnswer:"
-                )
-                try:
-                    answer, used_backend = self._call_llm_with_fallback(fallback_prompt, llm_backend, model_name, temperature)
-                    if used_backend is None:
-                        raise RuntimeError(answer)
-                except Exception as e:
-                    logger.error(f"LLM fallback failed: {e}")
-                    answer = "I couldn't generate an answer right now. Please try again."
-                
-                # Return the raw answer (no additional enforcement)
-                final_answer = (retrieval_note + answer) if retrieval_note else answer
-                return {
-                    "answer": final_answer,
-                    "sources": [],
-                    "search_info": {
-                        "strategy": search_strategy,
-                        "question_types": None,
-                        "filters": None,
-                        "total_found": 0,
-                        "used_fallback": True
-                    }
+        # Retrieval is the only context source: single retrieval call (no extra steps)
+        search_results = self.search(question, n_results=max_results, rerank=True)
+
+        # If still nothing, graceful LLM-only fallback
+        if not (search_results and search_results.get('documents') and search_results['documents'] and search_results['documents'][0]):
+            retrieval_note = ""
+            if search_results and search_results.get('retrieval_ok') is False:
+                retrieval_note = "Note: retrieval system not configured or unreachable. "
+
+            # Include prior conversation turns in the fallback prompt
+            history_lines = []
+            for m in self._get_history_messages():
+                if m["role"] == "user":
+                    history_lines.append(f"User: {m['content']}")
+                elif m["role"] == "assistant":
+                    history_lines.append(f"Assistant: {m['content']}")
+            history_block = ("Conversation so far:\n" + "\n".join(history_lines) + "\n\n") if history_lines else ""
+            fallback_prompt = (
+                "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
+                "No repository context is available for this question. Provide a practical, step-by-step answer "
+                "with a small code example when helpful. Keep it accurate and concise.\n\n"
+                f"{history_block}Question: {question}\n\nAnswer:"
+            )
+            try:
+                answer, used_backend = self._call_llm_with_fallback(fallback_prompt, llm_backend, model_name, temperature)
+                if used_backend is None:
+                    raise RuntimeError(answer)
+            except Exception as e:
+                logger.error(f"LLM fallback failed: {e}")
+                answer = "I couldn't generate an answer right now. Please try again."
+
+            final_answer = (retrieval_note + answer) if retrieval_note else answer
+            try:
+                self._record_user(question)
+                self._record_assistant(final_answer)
+            except Exception:
+                pass
+            return {
+                "answer": final_answer,
+                "sources": [],
+                "search_info": {
+                    "strategy": search_strategy,
+                    "question_types": None,
+                    "filters": None,
+                    "total_found": 0,
+                    "used_fallback": True
                 }
-        
-        # Process documents directly since reranking is done by the API
+            }
+
+        # Build context docs
         documents = search_results['documents'][0]
         metadatas = search_results.get('metadatas', [[]])[0]
         distances = search_results.get('distances', [[]])[0]
-        
-        context_docs = []
+
+        context_docs: List[Dict[str, Any]] = []
         for i, doc_text in enumerate(documents[:max_results]):
             metadata = metadatas[i] if i < len(metadatas) else {}
-            distance = distances[i] if i < len(distances) else 0.5
-
             context_docs.append({
                 'text': doc_text,
                 'metadata': metadata,
@@ -699,48 +862,19 @@ Context:
                     'language': metadata.get('language', 'unknown')
                 }
             })
-        
-        if not context_docs:
-            # Use fallback LLM answer without context
-            fallback_prompt = (
-                "You are BeagleMind, a concise, reliable assistant for Beagleboard tasks.\n\n"
-                "No repository context is available for this question. Provide a practical, step-by-step answer "
-                "with a small code example when helpful. Keep it accurate and concise.\n\n"
-                f"Question: {question}\n\nAnswer:"
-            )
-            try:
-                if llm_backend.lower() == "groq":
-                    answer = self._get_groq_response(fallback_prompt, model_name, temperature)
-                elif llm_backend.lower() == "openai":
-                    answer = self._get_openai_response(fallback_prompt, model_name, temperature)
-                elif llm_backend.lower() == "ollama":
-                    answer = self._get_ollama_response(fallback_prompt, model_name, temperature)
-                else:
-                    raise ValueError(f"Unsupported LLM backend: {llm_backend}")
-            except Exception as e:
-                logger.error(f"LLM fallback failed: {e}")
-                answer = "I couldn't generate an answer right now. Please try again."
-            
-            retrieval_note = ""
-            if search_results and search_results.get('retrieval_ok') is False:
-                retrieval_note = "Note: retrieval system not configured or unreachable. "
 
-            return {
-                "answer": (retrieval_note + answer) if retrieval_note else answer,
-                "sources": [],
-                "search_info": {
-                    "strategy": search_strategy,
-                    "question_types": None,
-                    "filters": None,
-                    "total_found": 0,
-                    "used_fallback": True
-                }
-            }
-        
-        # Generate context-aware prompt
+        # Generate prompt with conversation history
         prompt = self.generate_context_aware_prompt(question, context_docs, None)
-        
-        # Get answer from LLM using selected backend
+        history_lines = []
+        for m in self._get_history_messages():
+            if m["role"] == "user":
+                history_lines.append(f"User: {m['content']}")
+            elif m["role"] == "assistant":
+                history_lines.append(f"Assistant: {m['content']}")
+        if history_lines:
+            prompt = "Conversation so far:\n" + "\n".join(history_lines) + "\n\n---\n" + prompt
+
+        # Call LLM
         try:
             answer, used_backend = self._call_llm_with_fallback(prompt, llm_backend, model_name, temperature)
             if used_backend is None:
@@ -748,13 +882,11 @@ Context:
         except Exception as e:
             logger.error(f"LLM invocation failed: {e}")
             answer = f"Error generating answer: {str(e)}"
-        
-    # Return the answer as-is (no substantive enforcement)
-        
-        # Prepare source information
+
+        # Prepare sources
         sources = []
         for doc in context_docs:
-            source_info = {
+            sources.append({
                 "content": doc['text'],
                 "file_name": doc['file_info'].get('name', 'Unknown'),
                 "file_path": doc['file_info'].get('path', ''),
@@ -768,9 +900,15 @@ Context:
                     "has_images": doc['metadata'].get('has_images', False),
                     "quality_score": doc['metadata'].get('content_quality_score')
                 }
-            }
-            sources.append(source_info)
-        
+            })
+
+        # Record turn
+        try:
+            self._record_user(question)
+            self._record_assistant(answer)
+        except Exception:
+            pass
+
         return {
             "answer": answer,
             "sources": sources,

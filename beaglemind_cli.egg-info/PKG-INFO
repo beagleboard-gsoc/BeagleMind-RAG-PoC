@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: beaglemind-cli
-Version: 1.0.0
+Version: 1.0.3
 Summary: Intelligent documentation assistant CLI for Beagleboard projects
 Author-email: Fayez Zouari <fayez.zouari@insat.ucar.tn>
 License: MIT
